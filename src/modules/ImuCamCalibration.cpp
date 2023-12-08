@@ -14,6 +14,11 @@
 #include <string>
 #include <thread>
 
+#if WITH_IMU_CALIBRATION
+#    define ENABLE_IMU true
+#else
+#    define ENABLE_IMU false
+#endif
 namespace pt = boost::property_tree;
 namespace fs = std::filesystem;
 
@@ -22,19 +27,6 @@ std::string getTimeString() {
         "{:%Y-%m-%dT%H-%M-%SZ}",
         fmt::localtime(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())));
 }
-
-namespace ImuCamModelTypes {
-const std::string RADTAN = "Pinhole-RadialTangential";
-const std::string EQUIDISTANT = "Pinhole-Equidistant";
-
-} // namespace ImuCamModelTypes
-
-namespace QualityStrings {
-const std::string EXCELLENT = "excellent";
-const std::string GOOD = "good";
-const std::string POOR = "poor";
-const std::string BAD = "bad";
-} // namespace QualityStrings
 
 class ImuCamCalibration : public dv::ModuleBase {
 protected:
@@ -62,6 +54,7 @@ protected:
 
     CollectionState collectionState = BEFORE_COLLECTING;
 
+#if ENABLE_IMU
     static std::optional<double> estimateFrequency(const std::vector<int64_t>& timestamps) {
         std::vector<double> freq;
         if (timestamps.size() < 2) {
@@ -80,6 +73,8 @@ protected:
     }
 
     std::optional<double> imuUpdateRate = std::nullopt;
+
+#endif
 
     void writeDataLogBuffer(const int64_t leaveLastMicroseconds = 0) {
         if (mDataLogBuffer.empty() || mDataLog == nullptr) {
@@ -117,8 +112,10 @@ protected:
 public:
     static void initInputs(dv::InputDefinitionList& in) {
         in.addFrameInput("left");
-        in.addIMUInput("imu", true);
         in.addFrameInput("right", true);
+#if ENABLE_IMU
+        in.addIMUInput("imu", true);
+#endif
     }
 
     static void initOutputs(dv::OutputDefinitionList& out) {
@@ -183,9 +180,11 @@ public:
         config.add(
             "maxIter",
             dv::ConfigOption::intOption("Maximum number of iteration of calibration optimization problem", 50, 1, 100));
+#if ENABLE_IMU
         config.add(
             "timeCalibration",
             dv::ConfigOption::boolOption("If true, time offset between the sensors will be calibrated", true));
+#endif
 
         // IMU noise parameters
         config.add("recordData", dv::ConfigOption::boolOption("Record collected data in the output directory", true));
@@ -352,21 +351,25 @@ public:
         }
 
         mOptions.maxIter = static_cast<size_t>(config.getInt("maxIter"));
+
+#if ENABLE_IMU
         mOptions.timeCalibration = config.getBool("timeCalibration");
 
         if (imuUpdateRate.has_value()) {
             mOptions.imuParameters.updateRate = *imuUpdateRate;
         }
-
+#endif
         setupCalibrator();
 
         // TODO: wrap a class around the MonoCameraWriter and the StereoCameraWriter
         if (config.getBool("recordData")) {
             mWriterConfig.cameraName = getCameraID("left");
             mWriterConfig.addFrameStream(frameInput.size(), "frames");
+#if ENABLE_IMU
             if (inputs.getIMUInput("imu").isConnected()) {
                 mWriterConfig.addImuStream("imu");
             }
+#endif
             mWriterConfig.addFrameStream(frameInput.size(), "left_frames", frameInput.getOriginDescription());
             mWriterConfig.addStream<dv::TimedKeyPointPacket>("left_markers");
             if (rightInput.isConnected()) {
@@ -390,10 +393,12 @@ public:
             outputs.getFrameOutput("right").setup(inputs.getFrameInput("left"));
         }
 
+#if ENABLE_IMU
         // If imu input is connected, do not initialize and wait until imu frequency is estimated
         if (!inputs.getIMUInput("imu").isConnected()) {
             initializeCalibrator();
         }
+#endif
 
         // Unclick all the buttons and update the state
         config.setBool("startCollecting", false);
@@ -458,6 +463,7 @@ public:
         writeDataLogBuffer(1000000);
     }
 
+#if ENABLE_IMU
     std::optional<size_t> estimateImuFrequency(const dv::IMUPacket& packet) {
         for (const auto& measurement : packet.elements) {
             mTimes.push_back(measurement.timestamp);
@@ -470,6 +476,7 @@ public:
             return std::nullopt;
         }
     }
+#endif
 
     const dv::Frame& closestRightFrame(const int64_t timestamp) {
         auto iter
@@ -483,6 +490,8 @@ public:
         if (mCalibrator == nullptr) {
             handleCollectionState();
         }
+
+#if ENABLE_IMU
         // Process IMU input
         if (inputs.isConnected("imu")) {
             auto imuInput = inputs.getIMUInput("imu");
@@ -518,6 +527,7 @@ public:
                 }
             }
         }
+#endif
 
         const auto& rightInput = inputs.getFrameInput("right");
         const bool stereo = rightInput.isConnected();
@@ -717,32 +727,7 @@ protected:
             std::nullopt};
     }
 
-    dv::camera::calibrations::CameraCalibration getIntrinsicCalibrationData(
-        const CameraCalibrationUtils::CalibrationResult& res,
-        const std::string& position,
-        const std::string& inputName) {
-        const Eigen::Matrix<float, 4, 4, Eigen::RowMajor> floatTransform = res.baseline.cast<float>().eval();
-
-        dv::camera::DistortionModel distortionModel = dv::camera::DistortionModel::RadTan;
-        if (config.getString("calibrationModel") == ImuCamModelTypes::EQUIDISTANT) {
-            distortionModel = dv::camera::DistortionModel::Equidistant;
-        }
-
-        dv::camera::calibrations::CameraCalibration cal(
-            getCameraID(inputName),
-            position,
-            isInputMaster(inputName),
-            getInputResolution(inputName),
-            cv::Point2f(static_cast<float>(res.projection.at(2)), static_cast<float>(res.projection.at(3))),
-            cv::Point2f(static_cast<float>(res.projection.at(0)), static_cast<float>(res.projection.at(1))),
-            std::vector<float>(res.distortion.begin(), res.distortion.end()),
-            distortionModel,
-            std::vector<float>(floatTransform.data(), floatTransform.data() + 16),
-            getCameraCalibrationMetadata(res));
-
-        return cal;
-    }
-
+#if ENABLE_IMU
     std::tuple<float, float, cv::Point3f, cv::Point3f, float, float, float, float, float, float>
         getIMUCharacteristics() {
         float omega_max, acc_max, omega_offset_var, acc_offset_var, omega_noise_density, acc_noise_density,
@@ -826,6 +811,7 @@ protected:
 
         return cal;
     }
+#endif
 
     void drawQuality(cv::Mat& image) {
         cv::Scalar color;
@@ -855,11 +841,27 @@ protected:
 
         dv::camera::CalibrationSet calib;
 
-        calib.addCameraCalibration(getIntrinsicCalibrationData(intrinsicResult[0], "left", "left"));
+        // todo(giovanni): make method out of this block -> reused in "saveCalibration"
+        auto calibrationInfo = mCalibrator->getCalibrationInfo();
+        PatternInfo patternInfo(
+            config.getString("patternType"),
+            cv::Size(getPatternRows(), getPatternColumns()),
+            config.getFloat("markerSize"),
+            config.getFloat("markerSpacing"));
+        std::ostringstream optimizationInfo;
+        optimizationInfo << "kalibr: " << calibrationInfo[0].numImagesUsed << " out of "
+                         << calibrationInfo[0].numImagesTotal << " images used";
+
+        calib.addCameraCalibration(
+            getIntrinsicCalibrationData(intrinsicResult[0], patternInfo, "left", "left", optimizationInfo.str()));
         log.info << "Calibration quality left camera: " << calib.getCameraCalibration("left")->metadata->quality
                  << dv::logEnd;
         if (intrinsicResult.size() > 1) {
-            calib.addCameraCalibration(getIntrinsicCalibrationData(intrinsicResult[1], "right", "right"));
+            optimizationInfo.clear();
+            optimizationInfo << "kalibr: " << calibrationInfo[1].numImagesUsed << " out of "
+                             << calibrationInfo[1].numImagesTotal << " images used";
+            calib.addCameraCalibration(
+                getIntrinsicCalibrationData(intrinsicResult[1], patternInfo, "right", "right", optimizationInfo.str()));
             log.info << "Calibration quality right camera: " << calib.getCameraCalibration("right")->metadata->quality
                      << dv::logEnd;
         }
@@ -878,16 +880,33 @@ protected:
         const auto filePath = saveDir / "calibration.json";
 
         dv::camera::CalibrationSet calib;
+        auto calibrationInfo = mCalibrator->getCalibrationInfo();
+        PatternInfo patternInfo(
+            config.getString("patternType"),
+            cv::Size(getPatternRows(), getPatternColumns()),
+            config.getFloat("markerSize"),
+            config.getFloat("markerSpacing"));
+        std::ostringstream optimizationInfo;
+        optimizationInfo << "kalibr: " << calibrationInfo[0].numImagesUsed << " out of "
+                         << calibrationInfo[0].numImagesTotal << " images used";
 
-        calib.addCameraCalibration(getIntrinsicCalibrationData(intrinsicResult[0], "left", "left"));
+        calib.addCameraCalibration(
+            getIntrinsicCalibrationData(intrinsicResult[0], patternInfo, "left", "left", optimizationInfo.str()));
         log.info << "Calibration quality left camera: " << calib.getCameraCalibration("left")->metadata->quality
                  << dv::logEnd;
         if (intrinsicResult.size() > 1) {
-            calib.addCameraCalibration(getIntrinsicCalibrationData(intrinsicResult[1], "right", "right"));
+            optimizationInfo.clear();
+            optimizationInfo << "kalibr: " << calibrationInfo[1].numImagesUsed << " out of "
+                             << calibrationInfo[1].numImagesTotal << " images used";
+            calib.addCameraCalibration(
+                getIntrinsicCalibrationData(intrinsicResult[1], patternInfo, "right", "right", optimizationInfo.str()));
             log.info << "Calibration quality right camera: " << calib.getCameraCalibration("right")->metadata->quality
                      << dv::logEnd;
         }
+
+#if ENABLE_IMU
         calib.addImuCalibration(getIMUCalibrationData(result));
+#endif
 
         calib.writeToFile(filePath.string());
 
@@ -916,6 +935,7 @@ protected:
                 "Failed to calibrate intrinsics! Please check that the pattern was well detected on the images");
         }
 
+#if ENABLE_IMU
         if (calibrateImu) {
             outLog << "Building the problem..." << std::endl;
             mCalibrator->buildProblem();
@@ -945,7 +965,9 @@ protected:
                 initializeCalibrator();
                 collectionState = BEFORE_COLLECTING;
             }
-        } else {
+        } else
+#endif
+        {
             saveIntrinsicCalibration(intrinsicsResult.value());
             config.setBool("calibrationFinished", true);
             collectionState = CALIBRATED;
