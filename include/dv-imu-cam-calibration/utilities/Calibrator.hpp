@@ -24,6 +24,7 @@
 #include <string>
 #include <tbb/parallel_for_each.h>
 
+// todo(giovanni): add seed
 /**
  * IMU camera calibration.
  */
@@ -203,6 +204,7 @@ public:
         }
 
         assert(iccCameras.size() > 0);
+        mCameraCalibrationInfo.reserve(iccCameras.size());
 
         iccImu = boost::make_shared<IccImu>(calibratorOptions.imuParameters, imuData);
 
@@ -525,6 +527,9 @@ public:
         state = CalibratorUtils::CALIBRATING;
 
         static constexpr bool doBlakeZisserman = false;
+
+        std::cout << "1) COMPUTE INTRINSICS AND DISTORTION FOR ALL CAMERAS" << std::endl;
+        // 1) compute intrinsics and distortion for all cameras
         std::vector<boost::shared_ptr<CameraGeometry<CameraGeometryType, DistortionType>>> geometries;
         {
             size_t camId = 0;
@@ -546,6 +551,8 @@ public:
             }
         }
 
+        // 2) compute baselines between cameras
+        std::cout << "2) COMPUTE BASELINES BETWEEN CAMERAS" << std::endl;
         std::vector<boost::shared_ptr<sm::kinematics::Transformation>> baselines;
         // Baseline c0->c0 is identity
         baselines.emplace_back(boost::make_shared<sm::kinematics::Transformation>(Eigen::Matrix4d::Identity()));
@@ -565,7 +572,11 @@ public:
 
         dv::runtime_assert(geometries.size() == iccCameras.size(), "Wrong camera count initialized for calibration");
 
+        // 3) remove corners with too big RE, then update intrinsics and baselines based on "refined batches"
+        std::cout << "3) REMOVE CORNERS WITH TOO BIG RE, THEN UPDATE INTRNSICS AND BASELINES USING REFINED BATCHES"
+                  << std::endl;
         size_t removedOutlierCornersCount = 0u;
+
         bool initOutlierRejection = true;
         while (true) {
             try {
@@ -684,6 +695,11 @@ public:
                               << calibrator.getNumBatches() << " images used" << std::endl;
                     auto result = calibrator.getResult(cameraId);
                     CameraCalibrationUtils::printResult(result, std::cout);
+                    CameraCalibrationInfo infoCam;
+                    infoCam.numImagesTotal = camTargetObservations[cameraId]->size();
+                    infoCam.numImagesUsed = calibrator.getNumBatches();
+                    infoCam.numCornerOutliers = removedOutlierCornersCount;
+                    mCameraCalibrationInfo.push_back(infoCam);
                     std::cout << std::endl;
 
                     iccCamera->updateIntrinsics(result.projection, result.distortion);
@@ -834,12 +850,11 @@ public:
         ss << "Calibrating using ";
         {
             std::lock_guard<std::mutex> lock1(targetObservationsMutex);
-            ss << camTargetObservations.at(0)->size() << " target observations and ";
+            ss << camTargetObservations.at(0)->size() << " target observations" << std::endl;
         }
-
         {
             std::lock_guard<std::mutex> lock2(imuDataMutex);
-            ss << imuData->size() << " IMU measurements " << std::endl;
+            ss << " and " << imuData->size() << " IMU measurements " << std::endl;
         }
 
         ss << "BEFORE OPTIMIZATION" << std::endl;
@@ -859,6 +874,7 @@ public:
     std::ostream& print(std::ostream& os) {
         {
             os << *iccImu;
+
             for (const auto& iccCamera : iccCameras) {
                 iccCamera->print(os);
             }

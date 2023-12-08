@@ -3,6 +3,7 @@ add_library(kalibr_imu_camera_calibration SHARED
 target_link_libraries(kalibr_imu_camera_calibration
         aslam_backend
         aslam_cameras
+        aslam_cameras_april
         aslam_cv_backend
         aslam_splines
         bsplines

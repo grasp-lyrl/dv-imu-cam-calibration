@@ -2,6 +2,7 @@
 
 #include "kalibr_imu_camera_calibration/iccCamera.hpp"
 #include "kalibr_imu_camera_calibration/iccImu.hpp"
+#include "utilities/utils.hpp"
 
 #include <aslam/backend/CameraDesignVariable.hpp>
 #include <aslam/backend/HomogeneousPoint.hpp>
@@ -89,6 +90,8 @@ public:
 
         // create the design variables
         dv = boost::make_shared<aslam::backend::CameraDesignVariable<CameraGeometryType>>(casted);
+
+        // design variable: projection and distortion active, shutter not
         setDvActiveStatus(true, true, false);
         isGeometryInitialized = false;
     }
@@ -138,8 +141,8 @@ protected:
     // thirdparty/kalibr/aslam_offline_calibration/kalibr/python/kalibr_camera_calibration/CameraIntializers.py
     // It was moved to avoid circular dependencies
     bool calibrateIntrinsics(
-        const std::vector<aslam::cameras::GridCalibrationTargetObservation>& obslist,
-        boost::shared_ptr<aslam::cameras::GridCalibrationTargetBase> target,
+        const std::vector<aslam::cameras::GridCalibrationTargetObservation>& obslist, // 2D keypoint location
+        boost::shared_ptr<aslam::cameras::GridCalibrationTargetBase> target, // 3D landmark location
         bool distortionActive = true,
         bool intrinsicsActive = true) {
         // verbose output
@@ -191,7 +194,7 @@ protected:
                 }
             }
         }
-        std::cout << "calibrateIntrinsics: added " << reprojectionErrors.size() << " camera error terms" << std::endl;
+        std::cout << "calibrateIntrinsics: added " << reprojectionErrors.size() << " RE camera error terms" << std::endl;
 
         // ############################################
         // ## solve
@@ -216,7 +219,7 @@ protected:
             }
 
             const auto [mean, std] = meanStd(vals);
-            std::cout << prefix << " mean: " << mean << " std: " << std << std::endl;
+            std::cout << prefix << " RE mean: " << mean << " std: " << std << std::endl;
         };
         printReprErrors("calibrateIntrinsics: Before Optimization: ");
 
@@ -396,48 +399,7 @@ public:
     }
 };
 
-namespace CameraCalibrationUtils {
-struct ErrorInfo {
-    Eigen::Vector2d mean;
-    Eigen::Vector2d std;
 
-    ErrorInfo(const Eigen::Vector2d& _mean, const Eigen::Vector2d& _std) : mean(_mean), std(_std) {
-    }
-};
-struct CalibrationResult {
-    const std::vector<double> projection;
-    const std::vector<double> distortion;
-    const ErrorInfo err_info;
-    Eigen::Matrix4d baseline;
-
-    CalibrationResult(
-        const std::vector<double>& _projection,
-        const std::vector<double>& _distortion,
-        const ErrorInfo& _err_info,
-        const Eigen::Matrix4d& _baseline) :
-        projection(_projection),
-        distortion(_distortion), err_info(_err_info), baseline(_baseline) {
-    }
-};
-static void printResult(const CameraCalibrationUtils::CalibrationResult& result, std::ostream& ss) {
-    ss << "Intrinsic calibration results:" << std::endl;
-    ss << "  projection: ";
-    for (const auto val : result.projection) {
-        ss << val << " ";
-    }
-    ss << std::endl;
-    ss << "  distortion: ";
-    for (const auto val : result.distortion) {
-        ss << val << " ";
-    }
-    ss << std::endl;
-
-    ss << "  reprojection error: [" << result.err_info.mean.x() << ", " << result.err_info.mean.y() << "] +- ["
-       << result.err_info.std.x() << ", " << result.err_info.std.y() << "]" << std::endl;
-
-    ss << "  baseline: " << result.baseline << std::endl;
-}
-} // namespace CameraCalibrationUtils
 
 template<typename CameraGeometryType, typename DistortionType>
 class CameraCalibration {

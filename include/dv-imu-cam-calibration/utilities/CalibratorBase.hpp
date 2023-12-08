@@ -27,6 +27,8 @@ namespace CalibratorUtils {
 double toSec(const int64_t time) {
     return static_cast<double>(time) / 1e6;
 }
+
+
 /**
  * Hold image and corresponding timestamp.
  */
@@ -56,6 +58,7 @@ enum PatternType { CHESSBOARD, ASYMMETRIC_CIRCLES_GRID, APRIL_GRID };
 enum State { INITIALIZED, COLLECTING, COLLECTED, CALIBRATING, CALIBRATED };
 
 struct Options {
+    // todo(giovanni): use PatternInfo from utils.hpp
     // Calibration pattern
     size_t rows = 11;
     size_t cols = 4;
@@ -100,12 +103,21 @@ StampedImage previewImageWithText(
 
 } // namespace CalibratorUtils
 
+struct CameraCalibrationInfo {
+    int numImagesTotal;
+    int numImagesUsed;
+    int numCornerOutliers;
+};
+
 /**
  * IMU camera calibration.
  */
 class CalibratorBase {
 public:
     virtual ~CalibratorBase() = default;
+
+    std::vector<CameraCalibrationInfo> mCameraCalibrationInfo;
+
     /**
      * Add IMU measurement to the calibration buffer.
      */
@@ -180,6 +192,10 @@ public:
     virtual void getDvInfoAfterOptimization(std::ostream& ss) = 0;
 
     virtual std::ostream& print(std::ostream& os) = 0;
+
+    std::vector<CameraCalibrationInfo> getCalibrationInfo(){
+        return mCameraCalibrationInfo;
+    }
 
 protected:
     /**
