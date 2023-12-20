@@ -121,8 +121,8 @@ int main(int ac, char **av) {
 	std::ostringstream optimizationInfo;
 	optimizationInfo << "kalibr: " << calibrationInfo.numImagesUsed << " out of " << calibrationInfo.numImagesTotal
 					 << " images used";
-	calib.addCameraCalibration(
-		getIntrinsicCalibrationData(result, patternInfo, "left", "left", optimizationInfo.str()));
+	calib.addCameraCalibration(getIntrinsicCalibrationData<aslam::cameras::RadialTangentialDistortion>(
+		result, patternInfo, "left", "left", optimizationInfo.str()));
 
 	calib.writeToFile(outputFilepath);
 

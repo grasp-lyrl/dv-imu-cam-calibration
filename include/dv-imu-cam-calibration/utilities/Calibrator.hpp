@@ -594,14 +594,13 @@ public:
 
 							for (size_t camId = 0; camId < numCams; camId++) {
 								// calculate the reprojection errors statistics
-								const auto [corners, reprojs, rerrs] = calibrator.getReprojectionErrors(camId);
-								const auto [me, se]                  = getReprojectionErrorStatistics(rerrs);
-								const auto se_threshold              = 4.0 * se;
-
+								const auto reprojectionErrors = calibrator.getReprojectionErrors(camId);
+								const auto [me, se]           = getReprojectionErrorStatistics(reprojectionErrors);
+								const auto se_threshold       = 4.0 * se;
 								// select corners to remove
 								std::vector<size_t> cornerRemovalList;
-								for (size_t pidx = 0; pidx < rerrs.at(batch_id).size(); ++pidx) {
-									const auto reproj = rerrs.at(batch_id).at(pidx);
+								for (size_t pidx = 0; pidx < reprojectionErrors.at(batch_id).size(); ++pidx) {
+									const auto reproj = reprojectionErrors.at(batch_id).at(pidx);
 									if ((reproj.size() != 0)
 										&& (std::abs(reproj(0, 0)) > se_threshold.x()
 											|| std::abs(reproj(1, 0)) > se_threshold.y())) {
@@ -613,6 +612,7 @@ public:
 								// queue corners on this cam for removal
 								cornerRemovalList_allCams.push_back(cornerRemovalList);
 							}
+
 							// we do not plot
 
 							// remove the corners (if there are corners to be removed)

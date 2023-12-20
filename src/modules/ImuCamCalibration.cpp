@@ -696,10 +696,10 @@ protected:
 			mQuality = QualityStrings::BAD;
 		}
 
-		return {cv::Size(getPatternColumns(), getPatternRows()),
+		return dv::camera::calibrations::CameraCalibration::Metadata(cv::Size(getPatternColumns(), getPatternRows()),
 			cv::Size(getInternalPatternColumns(), getInternalPatternRows()), config.getString("patternType"),
 			config.getFloat("markerSize"), config.getFloat("markerSpacing"), meanStd, mTimestampString, mQuality, "",
-			std::nullopt};
+			std::nullopt);
 	}
 
 #if ENABLE_IMU
@@ -802,16 +802,16 @@ protected:
 		optimizationInfo << "kalibr: " << calibrationInfo[0].numImagesUsed << " out of "
 						 << calibrationInfo[0].numImagesTotal << " images used";
 
-		calib.addCameraCalibration(
-			getIntrinsicCalibrationData(intrinsicResult[0], patternInfo, "left", "left", optimizationInfo.str()));
+		addCalibration(calib, intrinsicResult[0], patternInfo, "left", "left", optimizationInfo.str());
+
 		log.info << "Calibration quality left camera: " << calib.getCameraCalibration("left")->metadata->quality
 				 << dv::logEnd;
 		if (intrinsicResult.size() > 1) {
 			optimizationInfo.clear();
 			optimizationInfo << "kalibr: " << calibrationInfo[1].numImagesUsed << " out of "
 							 << calibrationInfo[1].numImagesTotal << " images used";
-			calib.addCameraCalibration(
-				getIntrinsicCalibrationData(intrinsicResult[1], patternInfo, "right", "right", optimizationInfo.str()));
+			addCalibration(calib, intrinsicResult[1], patternInfo, "right", "right", optimizationInfo.str());
+
 			log.info << "Calibration quality right camera: " << calib.getCameraCalibration("right")->metadata->quality
 					 << dv::logEnd;
 		}
@@ -835,17 +835,16 @@ protected:
 		std::ostringstream optimizationInfo;
 		optimizationInfo << "kalibr: " << calibrationInfo[0].numImagesUsed << " out of "
 						 << calibrationInfo[0].numImagesTotal << " images used";
+		addCalibration(calib, intrinsicResult[0], patternInfo, "left", "left", optimizationInfo.str());
 
-		calib.addCameraCalibration(
-			getIntrinsicCalibrationData(intrinsicResult[0], patternInfo, "left", "left", optimizationInfo.str()));
 		log.info << "Calibration quality left camera: " << calib.getCameraCalibration("left")->metadata->quality
 				 << dv::logEnd;
 		if (intrinsicResult.size() > 1) {
 			optimizationInfo.clear();
 			optimizationInfo << "kalibr: " << calibrationInfo[1].numImagesUsed << " out of "
 							 << calibrationInfo[1].numImagesTotal << " images used";
-			calib.addCameraCalibration(
-				getIntrinsicCalibrationData(intrinsicResult[1], patternInfo, "right", "right", optimizationInfo.str()));
+			addCalibration(calib, intrinsicResult[1], patternInfo, "right", "right", optimizationInfo.str());
+
 			log.info << "Calibration quality right camera: " << calib.getCameraCalibration("right")->metadata->quality
 					 << dv::logEnd;
 		}
@@ -920,6 +919,22 @@ protected:
 			collectionState = CALIBRATED;
 		}
 		std::cout.rdbuf(rdbuf);
+	}
+
+	void addCalibration(dv::camera::CalibrationSet &calib, const CameraCalibrationUtils::CalibrationResult &res,
+		PatternInfo patternInfo, const std::string &position, const std::string &inputName,
+		const std::string &comment = "", cv::Size resolution = cv::Size(640, 480), bool isMaster = true) {
+		if (mCalibrationModel == ImuCamModelTypes::EQUIDISTANT) {
+			calib.addCameraCalibration(getIntrinsicCalibrationData<aslam::cameras::EquidistantDistortion>(
+				res, patternInfo, position, inputName, comment));
+		}
+		else if (mCalibrationModel == ImuCamModelTypes::RADTAN) {
+			calib.addCameraCalibration(getIntrinsicCalibrationData<aslam::cameras::RadialTangentialDistortion>(
+				res, patternInfo, position, inputName, comment));
+		}
+		else {
+			throw std::invalid_argument("Unexpected model name encountered when running module");
+		}
 	}
 };
 

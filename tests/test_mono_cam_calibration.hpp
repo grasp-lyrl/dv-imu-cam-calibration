@@ -73,8 +73,17 @@ TEST(MonoCameraCalibrationNoImuTest, RadTanDistortionModel) {
 		return;
 	}
 	const auto res = intrResult.value();
-
 	CameraCalibrationUtils::printResult(res[0], std::cout);
+
+	// Check that the calibration converged (less than 1 pixel reprojection error)
+	const auto errorInfo = res[0].err_info;
+	EXPECT_LE(errorInfo.errorNormMean, 1.0);
+
+	// Check that results are consistent
+	EXPECT_NEAR(errorInfo.mean.x(), -1.22081e-06, 1e-3);
+	EXPECT_NEAR(errorInfo.mean.y(), -2.66866e-08, 1e-3);
+	EXPECT_NEAR(errorInfo.std.x(), 0.347521, 0.1);
+	EXPECT_NEAR(errorInfo.std.y(), 0.323904, 0.1);
 
 	const auto cameraCalib = res[0];
 	const auto distortion  = cameraCalib.distortion;
