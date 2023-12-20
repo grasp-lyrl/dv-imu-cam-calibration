@@ -1,1 +1,1 @@
-add_subdirectory(kalibr)
+ADD_SUBDIRECTORY(kalibr)
