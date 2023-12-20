@@ -13,21 +13,17 @@
 
 #include <cstddef>
 
-static constexpr size_t CALIBRATION_GROUP_ID = 0;
-static constexpr size_t HELPER_GROUP_ID = 1;
+static constexpr size_t CALIBRATION_GROUP_ID    = 0;
+static constexpr size_t HELPER_GROUP_ID         = 1;
 static constexpr size_t TRANSFORMATION_GROUP_ID = 2;
-static constexpr size_t LANDMARK_GROUP_ID = 3;
+static constexpr size_t LANDMARK_GROUP_ID       = 3;
 
-void addSplineDesignVariables(
-    boost::shared_ptr<aslam::calibration::OptimizationProblem> problem,
-    boost::shared_ptr<aslam::splines::BSplinePoseDesignVariable> dvc,
-    bool setActive = true,
-    size_t groupId = HELPER_GROUP_ID);
+void addSplineDesignVariables(boost::shared_ptr<aslam::calibration::OptimizationProblem> problem,
+	boost::shared_ptr<aslam::splines::BSplinePoseDesignVariable> dvc, bool setActive = true,
+	size_t groupId = HELPER_GROUP_ID);
 
-void addSplineDesignVariables(
-    boost::shared_ptr<aslam::calibration::OptimizationProblem> problem,
-    boost::shared_ptr<aslam::splines::EuclideanBSplineDesignVariable> dvc,
-    bool setActive = true,
-    size_t groupId = HELPER_GROUP_ID);
+void addSplineDesignVariables(boost::shared_ptr<aslam::calibration::OptimizationProblem> problem,
+	boost::shared_ptr<aslam::splines::EuclideanBSplineDesignVariable> dvc, bool setActive = true,
+	size_t groupId = HELPER_GROUP_ID);
 
 std::tuple<double, double, double> errorStatistics(std::vector<double> vals);

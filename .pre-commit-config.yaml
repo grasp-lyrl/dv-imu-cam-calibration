@@ -1,0 +1,57 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: check-merge-conflict
+        exclude: thirdparty
+      - id: check-xml
+        exclude: thirdparty
+      - id: check-yaml
+        exclude: thirdparty
+      - id: check-json
+        exclude: thirdparty
+      - id: no-commit-to-branch
+        exclude: thirdparty
+        args: [ "--branch=master" ]
+      - id: end-of-file-fixer
+        exclude: thirdparty
+      - id: fix-byte-order-marker
+        exclude: thirdparty
+      - id: trailing-whitespace
+        exclude: thirdparty
+      - id: check-executables-have-shebangs
+        exclude: thirdparty
+      - id: check-shebang-scripts-are-executable
+        exclude: thirdparty
+
+
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v15.0.7
+    hooks:
+      - id: clang-format
+        exclude: thirdparty
+        types_or: [ c++, c, cuda, java ]
+
+  - repo: https://github.com/cheshirekow/cmake-format-precommit
+    rev: v0.6.13
+    hooks:
+      - id: cmake-format
+        exclude: thirdparty
+
+  - repo: https://github.com/google/yapf
+    rev: v0.32.0
+    hooks:
+      - id: yapf
+        exclude: thirdparty
+        additional_dependencies: [ toml ]
+
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.16
+    hooks:
+      - id: mdformat
+        exclude: thirdparty
+        args: [ --wrap=120 ]
+        additional_dependencies:
+          - mdformat-myst
+          - mdformat-tables
