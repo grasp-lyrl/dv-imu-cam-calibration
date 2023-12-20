@@ -29,47 +29,6 @@ boost::shared_ptr<aslam::backend::TransformationBasic> addPoseDesignVariable(
 	return boost::make_shared<aslam::backend::TransformationBasic>(q_Dv->toExpression(), t_Dv->toExpression());
 }
 
-std::tuple<double, double> meanStd(std::vector<double> vals) {
-	double sum = 0.0;
-	for (const auto &val : vals) {
-		sum += val;
-	}
-	double mean = sum / static_cast<double>(vals.size());
-
-	double stdSum = 0.0;
-	for (const auto &val : vals) {
-		double diff = val - mean;
-		stdSum      += diff * diff;
-	}
-	double std = sqrt(stdSum / (static_cast<double>(vals.size() - 1)));
-
-	return std::make_tuple(mean, std);
-}
-
-std::tuple<Eigen::Vector2d, Eigen::Vector2d> getReprojectionErrorStatistics(
-	const std::vector<std::vector<Eigen::MatrixXd>> &all_rerrs) {
-	std::vector<double> xVals, yVals;
-	for (const auto &view_rerrs : all_rerrs) {
-		if (view_rerrs.empty()) {
-			continue;
-		}
-
-		for (const auto &rerr : view_rerrs) {
-			if (rerr.size() == 0) {
-				continue;
-			}
-
-			xVals.push_back(rerr(0, 0));
-			yVals.push_back(rerr(1, 0));
-		}
-	}
-
-	const auto [xMean, xStd] = meanStd(xVals);
-	const auto [yMean, yStd] = meanStd(yVals);
-
-	return std::make_tuple(Eigen::Vector2d(xMean, yMean), Eigen::Vector2d(xStd, yStd));
-}
-
 template<typename CameraGeometryType, typename DistortionType>
 class CameraGeometry {
 private:
@@ -126,6 +85,10 @@ public:
 		return isGeometryInitialized;
 	}
 
+	boost::shared_ptr<CameraGeometryType> getCameraGeometry() {
+		return iccCamera->getCameraGeometry();
+	}
+
 	boost::shared_ptr<aslam::backend::CameraDesignVariable<CameraGeometryType>> getDv() {
 		return dv;
 	}
@@ -169,11 +132,11 @@ protected:
 
 		// # target pose dv for all target views (=T_camL_w)
 		typedef aslam::backend::ReprojectionError<CameraGeometryType> ReprojectionError;
-		std::vector<boost::shared_ptr<ReprojectionError>> reprojectionErrors;
 		std::cout << "calibrateIntrinsics: adding camera error terms for " << obslist.size() << " calibration targets"
 				  << std::endl;
 		std::vector<boost::shared_ptr<aslam::backend::TransformationBasic>> target_pose_dvs;
 		target_pose_dvs.reserve(obslist.size());
+		size_t numErrorTerms = 0;
 		for (const auto &obs : obslist) {
 			sm::kinematics::Transformation T_t_c;
 			iccCamera->getCameraGeometry()->estimateTransformation(obs, T_t_c);
@@ -189,12 +152,11 @@ protected:
 				if (obs.imagePoint(i, y)) {
 					auto rerr = boost::make_shared<ReprojectionError>(y, invR, T_cam_w * p_target, *dv);
 					problem->addErrorTerm(rerr);
-					reprojectionErrors.push_back(rerr);
+					++numErrorTerms;
 				}
 			}
 		}
-		std::cout << "calibrateIntrinsics: added " << reprojectionErrors.size() << " RE camera error terms"
-				  << std::endl;
+		std::cout << "calibrateIntrinsics: added " << numErrorTerms << " RE camera error terms" << std::endl;
 
 		// ############################################
 		// ## solve
@@ -211,14 +173,11 @@ protected:
 		optimizer.setProblem(problem);
 
 		// verbose output
-		auto printReprErrors = [&reprojectionErrors](const std::string &prefix) {
-			std::vector<double> vals;
-			vals.reserve(reprojectionErrors.size());
-			for (const auto &rerr : reprojectionErrors) {
-				vals.push_back(rerr->evaluateError());
-			}
-
-			const auto [mean, std] = meanStd(vals);
+		auto printReprErrors = [&](const std::string &prefix) {
+			const std::vector<std::vector<Eigen::Vector2d>> reprojectionErrors
+				= computeReprojectionErrors<CameraGeometryType>(obslist, target, iccCamera->getCameraGeometry());
+			const std::vector<double> reprojectionErrorNorms = computeReprojectionErrorNormsPerGrid(reprojectionErrors);
+			const auto [mean, std]                           = meanStd(reprojectionErrorNorms);
 			std::cout << prefix << " RE mean: " << mean << " std: " << std << std::endl;
 		};
 		printReprErrors("calibrateIntrinsics: Before Optimization: ");
@@ -514,37 +473,39 @@ public:
 		}
 	}
 
-	std::tuple<std::vector<std::vector<Eigen::MatrixXd>>, std::vector<std::vector<Eigen::MatrixXd>>,
-		std::vector<std::vector<Eigen::MatrixXd>>>
-		getReprojectionErrors(const size_t cameraId) {
-		std::vector<std::vector<Eigen::MatrixXd>> all_corners, all_reprojections, all_reprojection_errs;
+	std::vector<aslam::cameras::GridCalibrationTargetObservation> getObservations(const size_t cameraId) {
+		std::vector<aslam::cameras::GridCalibrationTargetObservation> obsList;
+		for (const auto &view : views) {
+			const auto &obs = view->rig_observations[cameraId];
+			obsList.push_back(obs);
+		}
+		return obsList;
+	}
 
+	std::vector<std::vector<Eigen::Vector2d>> getReprojectionErrors(const size_t cameraId) {
+		std::vector<std::vector<Eigen::Vector2d>> reprojectionErrorAllViews;
 		for (auto &view : views) {
-			// if cam_id in view.rerrs.keys(): // mono, not needed
-			std::vector<Eigen::MatrixXd> view_corners, view_reprojections, view_reprojection_errs;
+			std::vector<Eigen::MatrixXd> view_corners, view_reprojections;
+			std::vector<Eigen::Vector2d> reprojectionErrorPerGrid;
 			for (const auto &rerr : view->rerrs[cameraId]) {
-				// add if the corners were observed
-				Eigen::MatrixXd corner, reprojection, err;
-				if (rerr) {
-					corner       = rerr->getMeasurement();
-					reprojection = rerr->getPredictedMeasurement();
-					err          = corner - reprojection;
-				}
-				else {
-					// Nothing, empty matrix
+				if (!rerr) {
+					std::cerr << "Warning: encountered view in CameraCalibration with no data." << std::endl;
+					continue;
 				}
 
-				view_corners.push_back(corner);
-				view_reprojections.push_back(reprojection);
-				view_reprojection_errs.push_back(err);
+				// add if the corners were observed
+				Eigen::Vector2d corner, reprojection;
+				corner       = rerr->getMeasurement();
+				reprojection = rerr->getPredictedMeasurement();
+
+				const Eigen::Vector2d reprojectionError = corner - reprojection;
+				reprojectionErrorPerGrid.push_back(reprojectionError);
 			}
 
-			all_corners.push_back(view_corners);
-			all_reprojections.push_back(view_reprojections);
-			all_reprojection_errs.push_back(view_reprojection_errs);
+			reprojectionErrorAllViews.push_back(reprojectionErrorPerGrid);
+			;
 		}
-
-		return std::make_tuple(all_corners, all_reprojections, all_reprojection_errs);
+		return reprojectionErrorAllViews;
 	}
 
 	size_t nOfViews() {
@@ -622,11 +583,14 @@ public:
 		}
 
 		// reproj error statistics
-		CameraCalibrationUtils::ErrorInfo err_info(Eigen::Vector2d(-1., -1.), Eigen::Vector2d(-1., -1.));
-		const auto [corners, reprojs, rerrs] = getReprojectionErrors(0);
-		if (!rerrs.empty()) {
-			const auto [me, std] = getReprojectionErrorStatistics(rerrs);
-			err_info             = CameraCalibrationUtils::ErrorInfo(me, std);
+		CameraCalibrationUtils::ErrorInfo err_info;
+
+		const auto reprojectionErrors = getReprojectionErrors(cameraId);
+		if (!reprojectionErrors.empty()) {
+			const auto [me, std]                     = getReprojectionErrorStatistics(reprojectionErrors);
+			const auto reprojectionErrorNorms        = computeReprojectionErrorNormsPerGrid(reprojectionErrors);
+			const auto [errorNormMean, errorNormStd] = meanStd(reprojectionErrorNorms);
+			err_info = CameraCalibrationUtils::ErrorInfo(me, std, errorNormMean, errorNormStd);
 		}
 
 		Eigen::Matrix4d baseline   = Eigen::Matrix4d::Identity();

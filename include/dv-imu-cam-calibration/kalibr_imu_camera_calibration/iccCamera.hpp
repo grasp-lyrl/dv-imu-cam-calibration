@@ -77,7 +77,7 @@ public:
 		const double reprojectionSigma = 1.0, const bool showCorners = true, const bool showReproj = true,
 		const bool showOneStep = false) :
 		camera(intrinsics, distCoeffs, _imageSize),
-		imageSize(imageSize),
+		imageSize(_imageSize),
 		cornerUncertainty(reprojectionSigma) {
 		targetObservations = observations;
 		gravity_w          = Eigen::Vector3d(9.80655, 0., 0.);
@@ -207,7 +207,7 @@ public:
 		std::cout << b_gyro.transpose() << std::endl << std::endl;
 	}
 
-	boost::shared_ptr<aslam::cameras::CameraGeometryBase> getCameraGeometry() {
+	boost::shared_ptr<CameraGeometryType> getCameraGeometry() {
 		return camera.getGeometry();
 	}
 
