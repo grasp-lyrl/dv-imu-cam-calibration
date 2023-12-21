@@ -9,29 +9,42 @@
 #include <dv-processing/io/mono_camera_recording.hpp>
 #include <dv-processing/io/mono_camera_writer.hpp>
 
+#include <boost/property_tree/json_parser.hpp>
+
 #include <cstdlib>
 #include <fstream>
-#include <regex>
 #include <string>
-#include <thread>
+
+using namespace boost::property_tree;
+
+/**
+ * @param framesPath path to file containing frames with patterns to be detected for calibration
+ * @param outputFilepath path to file where to save the calibration
+ * @param patternPath path to json file containing calibration pattern information (name, shape, dimensions)
+ * @param width number of pixels along the width of sensor
+ * @param height number of pixels along the height of sensor
+ */
+void runCameraCalibration(const std::string &framesPath, const std::string &outputFilepath,
+	const std::string &patternPath, const int32_t width, const int32_t height);
 
 int main(int ac, char **av) {
-	std::string filepath;
-	int numPatternRows;
-	int numPatternCols;
-	float markerSize;
-	float markerSpacing;
+	std::string framesPath;
+	std::string patternPath;
 	std::string outputFilepath;
-	cv::Size resolution(640, 480);
+	int32_t width;
+	int32_t height;
 
 	// Use CLI11 library to handle argument parsing
 	CLI::App app{""};
-	app.add_option("-f,--filepath", filepath, "");
-	app.add_option("-r,--row", numPatternRows, "Number of points to detect along one row")->required();
-	app.add_option("-c,--col", numPatternCols, "Number of points to detect along one column")->required();
-	app.add_option("--size", markerSize, "Size of a single marker on calibration pattern [m]")->required();
-	app.add_option("--spacing", markerSpacing, "Space proportion wrt marker size")->required();
-	app.add_option("-o,--outputFile", outputFilepath, "Absolute filepath where to save the calibration file");
+	app.add_option("-f,--framesPath", framesPath,
+		   "Path to file containing frames with patterns to be detected for calibration.")
+		->required();
+	app.add_option("-o,--outputFile", outputFilepath, "Path to file where to save the calibration.")->required();
+	app.add_option("-p,--pattern", patternPath,
+		   "Path to json file containing calibration pattern information (name, shape, dimensions)")
+		->required();
+	app.add_option("--width", width, "Number of pixels along the width of sensor.")->default_val(640);
+	app.add_option("--height", height, "Number of pixels along the height of sensor.")->default_val(480);
 
 	try {
 		app.parse(ac, av);
@@ -40,10 +53,39 @@ int main(int ac, char **av) {
 		return app.exit(e);
 	}
 
-	dv::runtime_assert(!outputFilepath.empty(), "Empty path to save calibration file.");
+	runCameraCalibration(framesPath, outputFilepath, patternPath, width, height);
 
-	PatternInfo patternInfo("apriltag", cv::Size(numPatternRows, numPatternCols), markerSize, markerSpacing);
-	dv::io::MonoCameraRecording reader(filepath);
+	return EXIT_SUCCESS;
+}
+
+void runCameraCalibration(const std::string &framesPath, const std::string &outputFilepath,
+	const std::string &patternPath, const int32_t width, const int32_t height) {
+	ptree patternTree;
+	read_json(patternPath, patternTree);
+
+	const auto patternName    = patternTree.get<std::string>("name");
+	const auto numPatternRows = patternTree.get<int32_t>("rows");
+	const auto numPatternCols = patternTree.get<int32_t>("cols");
+	const auto markerSize     = patternTree.get<float>("size");
+	const auto markerSpacing  = patternTree.get<float>("spacing");
+
+	CalibratorUtils::PatternType patternType;
+	if (patternName == "CHESSBOARD") {
+		patternType = CalibratorUtils::PatternType::CHESSBOARD;
+	}
+	else if (patternName == "ASYMMETRIC_CIRCLES_GRID") {
+		patternType = CalibratorUtils::PatternType::ASYMMETRIC_CIRCLES_GRID;
+	}
+	else if (patternName == "APRIL_GRID") {
+		patternType = CalibratorUtils::PatternType::APRIL_GRID;
+	}
+	else {
+		throw std::invalid_argument(
+			"Pattern type name not supported, should be one of CHESSBOARD, ASYMMETRIC_CIRCLES_GRID, APRIL_GRID");
+	}
+
+	PatternInfo patternInfo(patternName, cv::Size(numPatternRows, numPatternCols), markerSize, markerSpacing);
+	dv::io::MonoCameraRecording reader(framesPath);
 	dv::FrameStreamSlicer slicer;
 
 	CalibratorUtils::Options options;
@@ -53,8 +95,8 @@ int main(int ac, char **av) {
 
 	options = CalibratorUtils::Options();
 	options.cameraInitialSettings.emplace_back();
-	options.cameraInitialSettings[0].imageSize = resolution;
-	options.pattern                            = CalibratorUtils::PatternType::APRIL_GRID;
+	options.cameraInitialSettings[0].imageSize = {width, height};
+	options.pattern                            = patternType;
 	options.cols                               = numPatternCols;
 	options.rows                               = numPatternRows;
 	options.spacingMeters                      = markerSize;
@@ -125,6 +167,4 @@ int main(int ac, char **av) {
 		result, patternInfo, "left", "left", optimizationInfo.str()));
 
 	calib.writeToFile(outputFilepath);
-
-	return EXIT_SUCCESS;
 }
