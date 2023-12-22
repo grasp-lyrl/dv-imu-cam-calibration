@@ -1,7 +1,7 @@
-#include "utilities/Calibrator.hpp"
-#include "utilities/CalibratorBase.hpp"
-
 #include <aslam/cameras.hpp>
+
+#include "wrappers/Calibrator.hpp"
+#include "wrappers/CalibratorBase.hpp"
 
 #include <dv-processing/camera/calibration_set.hpp>
 #include <dv-processing/io/mono_camera_writer.hpp>
@@ -570,7 +570,7 @@ public:
 						cv::FONT_HERSHEY_DUPLEX, .5, cv::Scalar(255, 0, 0), 2);
 				}
 				else if (collectionState == CALIBRATED) {
-					drawQuality(previews[0].image);
+					drawQuality(previews[0].image, mQuality);
 				}
 				outputs.getFrameOutput("left") << previews[0].timestamp << previews[0].image << dv::commit;
 				if (previews.size() == 2) {
@@ -672,36 +672,6 @@ protected:
 		return {frameInput.sizeX(), frameInput.sizeY()};
 	}
 
-	static std::vector<float> getIdentityMatrixVector() {
-		return std::vector<float>{1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
-	}
-
-	dv::camera::calibrations::CameraCalibration::Metadata getCameraCalibrationMetadata(
-		const CameraCalibrationUtils::CalibrationResult &intrinsicResult) {
-		std::stringstream ssError;
-		ssError << "Mean: " << intrinsicResult.err_info.mean.transpose()
-				<< " Standard deviation: " << intrinsicResult.err_info.std.transpose();
-
-		auto meanStd = (intrinsicResult.err_info.std.x() + intrinsicResult.err_info.std.y()) / 2.0;
-		if (meanStd < 0.1) {
-			mQuality = QualityStrings::EXCELLENT;
-		}
-		else if (meanStd < 0.2) {
-			mQuality = QualityStrings::GOOD;
-		}
-		else if (meanStd < 0.5) {
-			mQuality = QualityStrings::POOR;
-		}
-		else {
-			mQuality = QualityStrings::BAD;
-		}
-
-		return dv::camera::calibrations::CameraCalibration::Metadata(cv::Size(getPatternColumns(), getPatternRows()),
-			cv::Size(getInternalPatternColumns(), getInternalPatternRows()), config.getString("patternType"),
-			config.getFloat("markerSize"), config.getFloat("markerSpacing"), meanStd, mTimestampString, mQuality, "",
-			std::nullopt);
-	}
-
 #if ENABLE_IMU
 	std::tuple<float, float, cv::Point3f, cv::Point3f, float, float, float, float, float, float>
 		getIMUCharacteristics() {
@@ -768,24 +738,6 @@ protected:
 		return cal;
 	}
 #endif
-
-	void drawQuality(cv::Mat &image) {
-		cv::Scalar color;
-		if (mQuality == QualityStrings::EXCELLENT) {
-			color = cv::Scalar(0, 255, 0);
-		}
-		else if (mQuality == QualityStrings::GOOD) {
-			color = cv::Scalar(145, 255, 0);
-		}
-		else if (mQuality == QualityStrings::POOR) {
-			color = cv::Scalar(145, 0, 255);
-		}
-		else {
-			color = cv::Scalar(0, 0, 255);
-		}
-		cv::putText(image, fmt::format("Quality: {0}", mQuality), cv::Point(20, image.rows - 20),
-			cv::FONT_HERSHEY_DUPLEX, 1.0, color, 2);
-	}
 
 	void saveIntrinsicCalibration(const std::vector<CameraCalibrationUtils::CalibrationResult> &intrinsicResult) {
 		const auto saveDir = getCalibrationSaveDirectory();

@@ -1,4 +1,4 @@
-ADD_LIBRARY(kalibr_imu_camera_calibration SHARED common.cpp)
+ADD_LIBRARY(kalibr_imu_camera_calibration SHARED kalibr_common.cpp)
 TARGET_LINK_LIBRARIES(
 	kalibr_imu_camera_calibration
 	aslam_backend

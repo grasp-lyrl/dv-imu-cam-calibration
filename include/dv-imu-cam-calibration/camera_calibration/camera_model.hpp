@@ -1,7 +1,3 @@
-//
-// Created by radam on 2021-03-23.
-//
-
 #pragma once
 
 #include <aslam/Frame.hpp>
@@ -15,8 +11,11 @@
 
 #include <opencv2/opencv.hpp>
 
-#include <vector>
-
+/**
+ * Kalibr corresponding class in aslam_cv_backend/__init__.py
+ * @tparam CameraGeometryType
+ * @tparam DistortionType
+ */
 template<typename CameraGeometryType, typename DistortionType>
 class CameraModel {
 protected:
@@ -113,23 +112,5 @@ public:
 					  << distortionCoefficients.at(3) << "]" << std::endl;
 		}
 		return os;
-	}
-};
-
-struct ImuParameters {
-	double updateRate      = 200.0;
-	double accNoiseDensity = 1.4e-3;
-	double accRandomWalk   = 8.6e-5;
-	double gyrNoiseDensity = 8.0e-5;
-	double gyrRandomWalk   = 2.2e-6;
-
-	std::tuple<double, double, double> getAccelerometerStatistics() const {
-		double accelUncertaintyDiscrete = accNoiseDensity / sqrt(1.0 / updateRate);
-		return std::make_tuple(accelUncertaintyDiscrete, accRandomWalk, accNoiseDensity);
-	}
-
-	std::tuple<double, double, double> getGyroStatistics() const {
-		double gyroUncertaintyDiscrete = gyrNoiseDensity / sqrt(1.0 / updateRate);
-		return std::make_tuple(gyroUncertaintyDiscrete, gyrRandomWalk, gyrNoiseDensity);
 	}
 };

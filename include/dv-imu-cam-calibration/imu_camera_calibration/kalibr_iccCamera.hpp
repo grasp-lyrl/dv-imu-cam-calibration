@@ -1,9 +1,5 @@
 #pragma once
 
-#include <kalibr_imu_camera_calibration/common.hpp>
-
-#include <kalibr_common/ConfigReader.hpp>
-
 #include <aslam/Keypoint.hpp>
 #include <aslam/backend/BSplineMotionError.hpp>
 #include <aslam/backend/BlockCholeskyLinearSystemSolver.hpp>
@@ -28,20 +24,26 @@
 #include <sm/kinematics/Transformation.hpp>
 #include <sm/kinematics/transformations.hpp>
 
-#include "iccImu.hpp"
+#include "camera_calibration/camera_model.hpp"
+#include "imu_params.hpp"
+#include "kalibr_common.hpp"
+#include "kalibr_errorterms/EuclideanError.hpp"
+#include "kalibr_errorterms/GyroscopeError.hpp"
+#include "kalibr_iccImu.hpp"
 
 #include <boost/make_shared.hpp>
 
 #include <Eigen/Eigen>
 #include <iostream>
-#include <kalibr_errorterms/EuclideanError.hpp>
-#include <kalibr_errorterms/GyroscopeError.hpp>
 #include <string>
 
 namespace IccCameraUtils {
 using ObservationsPtr = boost::shared_ptr<std::map<int64_t, aslam::cameras::GridCalibrationTargetObservation>>;
 } // namespace IccCameraUtils
 
+/**
+ * Kalibr corresponding class in iccSensors.py
+ */
 template<typename CameraGeometryType, typename DistortionType>
 class IccCamera {
 public:

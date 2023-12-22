@@ -18,10 +18,24 @@ static constexpr size_t HELPER_GROUP_ID         = 1;
 static constexpr size_t TRANSFORMATION_GROUP_ID = 2;
 static constexpr size_t LANDMARK_GROUP_ID       = 3;
 
+/**
+ * Kalibr corresponding class in iccCalibrator.py
+ * @param problem
+ * @param dvc
+ * @param setActive
+ * @param groupId
+ */
 void addSplineDesignVariables(boost::shared_ptr<aslam::calibration::OptimizationProblem> problem,
 	boost::shared_ptr<aslam::splines::BSplinePoseDesignVariable> dvc, bool setActive = true,
 	size_t groupId = HELPER_GROUP_ID);
 
+/**
+ * Kalibr corresponding class in iccCalibrator.py
+ * @param problem
+ * @param dvc
+ * @param setActive
+ * @param groupId
+ */
 void addSplineDesignVariables(boost::shared_ptr<aslam::calibration::OptimizationProblem> problem,
 	boost::shared_ptr<aslam::splines::EuclideanBSplineDesignVariable> dvc, bool setActive = true,
 	size_t groupId = HELPER_GROUP_ID);

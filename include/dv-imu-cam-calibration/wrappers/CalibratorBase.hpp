@@ -1,9 +1,5 @@
 #pragma once
 
-#include "kalibr_imu_camera_calibration/iccCalibrator.hpp"
-#include "kalibr_imu_camera_calibration/iccCamera.hpp"
-#include "kalibr_imu_camera_calibration/iccImu.hpp"
-
 #include <aslam/cameras.hpp>
 #include <aslam/cameras/GridCalibrationTargetAprilgrid.hpp>
 #include <aslam/cameras/GridCalibrationTargetCheckerboard.hpp>
@@ -12,7 +8,10 @@
 
 #include <sm/boost/JobQueue.hpp>
 
-#include "kalibr_calibrate_cameras/CameraCalibrator.hpp"
+#include "camera_calibration/kalibr_camera_calibrator.hpp"
+#include "imu_camera_calibration/kalibr_iccCalibrator.hpp"
+#include "imu_camera_calibration/kalibr_iccCamera.hpp"
+#include "imu_camera_calibration/kalibr_iccImu.hpp"
 
 #include <dv-processing/exception/exception.hpp>
 #include <dv-processing/kinematics/transformation.hpp>
@@ -25,93 +24,6 @@
 #include <mutex>
 #include <string>
 #include <tbb/parallel_for_each.h>
-
-namespace CalibratorUtils {
-double toSec(const int64_t time) {
-	return static_cast<double>(time) / 1e6;
-}
-
-/**
- * Hold image and corresponding timestamp.
- */
-struct StampedImage {
-	cv::Mat image;
-	int64_t timestamp;
-
-	StampedImage(){};
-
-	StampedImage(cv::Mat img, const int64_t ts) : image(std::move(img)), timestamp(ts){};
-
-	/**
-	 * Clone the underlying image.
-	 *
-	 * @return
-	 */
-	StampedImage clone() const {
-		StampedImage clone;
-		clone.image     = image.clone();
-		clone.timestamp = timestamp;
-		return clone;
-	}
-};
-
-enum PatternType {
-	CHESSBOARD,
-	ASYMMETRIC_CIRCLES_GRID,
-	APRIL_GRID
-};
-
-enum State {
-	INITIALIZED,
-	COLLECTING,
-	COLLECTED,
-	CALIBRATING,
-	CALIBRATED
-};
-
-struct Options {
-	// todo(giovanni): use PatternInfo from utils.hpp
-	// Calibration pattern
-	size_t rows           = 11;
-	size_t cols           = 4;
-	double spacingMeters  = 0.05;
-	double patternSpacing = 0.3;
-	PatternType pattern   = PatternType::ASYMMETRIC_CIRCLES_GRID;
-
-	// Optimization problem
-	size_t maxIter       = 20;
-	bool timeCalibration = true;
-
-	// IMU
-	ImuParameters imuParameters;
-
-	// Camera
-	struct CameraInits {
-		std::vector<double> intrinsics;
-		std::vector<double> distCoeffs;
-		cv::Size imageSize;
-	};
-
-	std::vector<CameraInits> cameraInitialSettings;
-};
-
-StampedImage previewImageWithText(
-	const std::string &text, const int64_t timestamp = 0LL, const cv::Size &size = cv::Size(640, 480)) {
-	cv::Mat img = cv::Mat::zeros(size, CV_8UC3);
-
-	cv::putText(img, text, cv::Point(size.width / 8, size.height / 2), cv::FONT_HERSHEY_DUPLEX, 1.0,
-		cv::Scalar(255, 255, 255), 2);
-
-	return {img, timestamp};
-}
-
-} // namespace CalibratorUtils
-
-struct CameraCalibrationInfo {
-	int numImagesTotal;
-	int numImagesUsed;
-	int numCornerOutliers;
-};
 
 /**
  * IMU camera calibration.

@@ -1,9 +1,5 @@
 #pragma once
 
-#include <kalibr_imu_camera_calibration/common.hpp>
-
-#include <kalibr_common/ConfigReader.hpp>
-
 #include <aslam/Keypoint.hpp>
 #include <aslam/backend/BSplineMotionError.hpp>
 #include <aslam/backend/BlockCholeskyLinearSystemSolver.hpp>
@@ -28,14 +24,20 @@
 #include <sm/kinematics/Transformation.hpp>
 #include <sm/kinematics/transformations.hpp>
 
+#include "imu_params.hpp"
+#include "kalibr_common.hpp"
+#include "kalibr_errorterms/EuclideanError.hpp"
+#include "kalibr_errorterms/GyroscopeError.hpp"
+
 #include <boost/make_shared.hpp>
 
 #include <Eigen/Eigen>
 #include <iostream>
-#include <kalibr_errorterms/EuclideanError.hpp>
-#include <kalibr_errorterms/GyroscopeError.hpp>
 #include <string>
 
+/**
+ * Kalibr corresponding class in iccSensors.py
+ */
 namespace IccImuUtils {
 struct ImuMeasurement {
 public:
@@ -59,6 +61,9 @@ public:
 
 } // namespace IccImuUtils
 
+/**
+ * Kalibr corresponding class in iccSensors.py
+ */
 class IccImu {
 public:
 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW

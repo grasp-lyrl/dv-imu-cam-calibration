@@ -1,9 +1,5 @@
 #pragma once
 
-#include <kalibr_imu_camera_calibration/common.hpp>
-#include <kalibr_imu_camera_calibration/iccCamera.hpp>
-#include <kalibr_imu_camera_calibration/iccImu.hpp>
-
 #include <aslam/backend/BSplineMotionErrorFactory.hpp>
 #include <aslam/backend/BlockCholeskyLinearSystemSolver.hpp>
 #include <aslam/backend/DesignVariable.hpp>
@@ -19,6 +15,11 @@
 
 #include <bsplines/BSplinePose.hpp>
 
+#include "iccCalibrator_utils.hpp"
+#include "kalibr_common.hpp"
+#include "kalibr_iccCamera.hpp"
+#include "kalibr_iccImu.hpp"
+
 #include <boost/make_shared.hpp>
 
 #include <opencv2/opencv.hpp>
@@ -29,45 +30,11 @@
 #include <thread>
 #include <vector>
 
-namespace IccCalibratorUtils {
-struct ErrorInfo {
-	double meanReprojectionError;
-	double meanGyroscopeError;
-	double meanAccelerometerError;
-
-	ErrorInfo(const double repr, const double gyr, const double acc) :
-		meanReprojectionError(repr),
-		meanGyroscopeError(gyr),
-		meanAccelerometerError(acc) {
-	}
-};
-
-struct CalibrationResult {
-	double t_cam_imu;
-	Eigen::Matrix4d T_cam_imu;
-	bool converged;
-	ErrorInfo error_info;
-
-	CalibrationResult(
-		const double timeShift, const Eigen::Matrix4d &transformation, bool conv, const ErrorInfo &err_info) :
-		t_cam_imu(timeShift),
-		T_cam_imu(transformation),
-		converged(conv),
-		error_info(err_info) {
-	}
-};
-
-void printResult(const CalibrationResult &result, std::ostream &ss) {
-	ss << "Optimization converged:" << std::endl;
-	ss << "  " << (result.converged ? "true" : "false") << std::endl;
-	ss << "Transformation T_cam_imu:" << std::endl;
-	ss << result.T_cam_imu << std::endl;
-	ss << "Camera to imu time: [s] (t_imu = t_cam + shift):" << std::endl;
-	ss << "  " << result.t_cam_imu << std::endl;
-}
-
-} // namespace IccCalibratorUtils
-
+/**
+ * Kalibr corresponding class in iccCalibrator.py
+ * @tparam CameraGeometryType
+ * @tparam DistortionType
+ */
 template<typename CameraGeometryType, typename DistortionType>
 class IccCalibrator {
 public:
