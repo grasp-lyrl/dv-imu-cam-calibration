@@ -2,7 +2,7 @@
 // Created by radam on 2021-04-12.
 //
 
-#include <kalibr_imu_camera_calibration/common.hpp>
+#include "imu_camera_calibration/kalibr_common.hpp"
 
 #include <vector>
 

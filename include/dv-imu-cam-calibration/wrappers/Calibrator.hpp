@@ -1,9 +1,5 @@
 #pragma once
 
-#include "kalibr_imu_camera_calibration/iccCalibrator.hpp"
-#include "kalibr_imu_camera_calibration/iccCamera.hpp"
-#include "kalibr_imu_camera_calibration/iccImu.hpp"
-
 #include <aslam/cameras.hpp>
 #include <aslam/cameras/GridCalibrationTargetAprilgrid.hpp>
 #include <aslam/cameras/GridCalibrationTargetCheckerboard.hpp>
@@ -13,6 +9,10 @@
 #include <sm/boost/JobQueue.hpp>
 
 #include "CalibratorBase.hpp"
+#include "camera_calibration/kalibr_camera_calibrator.hpp"
+#include "imu_camera_calibration/kalibr_iccCalibrator.hpp"
+#include "imu_camera_calibration/kalibr_iccCamera.hpp"
+#include "imu_camera_calibration/kalibr_iccImu.hpp"
 
 #include <dv-processing/exception/exception.hpp>
 #include <dv-processing/kinematics/transformation.hpp>
@@ -22,7 +22,6 @@
 #include <Eigen/Eigen>
 #include <atomic>
 #include <iostream>
-#include <kalibr_calibrate_cameras/CameraCalibrator.hpp>
 #include <mutex>
 #include <string>
 #include <tbb/parallel_for_each.h>
