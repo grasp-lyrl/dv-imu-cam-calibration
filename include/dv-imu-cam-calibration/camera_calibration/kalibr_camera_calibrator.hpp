@@ -104,6 +104,11 @@ public:
 
 		auto estimator_return_value = estimator->addBatch(batch_problem, force);
 
+		// TODO: add condition if optimization diverges
+		//		if (estimator_return_value.numIterations >= estimator->getOptimizerOptions().maxIterations) {
+		//			throw OptimizationDiverged("");
+		//		}
+
 		bool success = estimator_return_value.batchAccepted;
 		if (success) {
 			views.push_back(batch_problem);
@@ -116,7 +121,20 @@ public:
 		return estimator->getNumBatches();
 	}
 
-	void replaceBatch(const size_t batch_id,
+	size_t getNumCorners(const size_t batch_id, const size_t cameraId) {
+		const auto obs = views.at(batch_id)->rig_observations.at(cameraId);
+
+		std::vector<unsigned int> cornerIndices;
+		obs.getCornersIdx(cornerIndices);
+		return cornerIndices.size();
+	}
+
+	void removeBatch(const size_t batch_id) {
+		estimator->removeBatch(batch_id);
+		views.erase(views.begin() + batch_id);
+	}
+
+	bool replaceBatch(const size_t batch_id,
 		boost::shared_ptr<CalibrationTargetOptimizationProblem<CameraGeometryType, DistortionType>> new_batch) {
 		estimator->removeBatch(views.at(batch_id));
 		views.at(batch_id) = new_batch;
@@ -127,6 +145,8 @@ public:
 		if (!rval.batchAccepted) {
 			views.erase(views.begin() + batch_id);
 		}
+
+		return rval.batchAccepted;
 	}
 
 	std::vector<aslam::cameras::GridCalibrationTargetObservation> getObservations(const size_t cameraId) {
@@ -138,14 +158,15 @@ public:
 		return obsList;
 	}
 
-	std::vector<std::vector<Eigen::Vector2d>> getReprojectionErrors(const size_t cameraId) {
-		std::vector<std::vector<Eigen::Vector2d>> reprojectionErrorAllViews;
+	std::vector<std::vector<std::optional<Eigen::Vector2d>>> getReprojectionErrors(const size_t cameraId) {
+		std::vector<std::vector<std::optional<Eigen::Vector2d>>> reprojectionErrorAllViews;
 		for (auto &view : views) {
-			std::vector<Eigen::MatrixXd> view_corners, view_reprojections;
-			std::vector<Eigen::Vector2d> reprojectionErrorPerGrid;
+			std::vector<std::optional<Eigen::Vector2d>> reprojectionErrorPerGrid;
 			for (const auto &rerr : view->rerrs[cameraId]) {
+				// Note: corners not observed are populated with nullptr in CalibrationOptimizationProblem
 				if (!rerr) {
-					std::cerr << "Warning: encountered view in CameraCalibration with no data." << std::endl;
+					// Observation does not exist
+					reprojectionErrorPerGrid.push_back(std::nullopt);
 					continue;
 				}
 
@@ -159,7 +180,6 @@ public:
 			}
 
 			reprojectionErrorAllViews.push_back(reprojectionErrorPerGrid);
-			;
 		}
 		return reprojectionErrorAllViews;
 	}
