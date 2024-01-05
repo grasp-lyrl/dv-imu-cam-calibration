@@ -535,163 +535,179 @@ public:
 		size_t removedOutlierCornersCount = 0u;
 
 		bool initOutlierRejection = true;
-		while (true) {
-			try {
-				std::cout << "calibrateIntrinsics: initializing calibrator" << std::endl;
-				CameraCalibration<CameraGeometryType, DistortionType> calibrator(
-					geometries, grid, baselines, false, doBlakeZisserman);
+		std::cout << "calibrateIntrinsics: initializing calibrator" << std::endl;
+		CameraCalibration<CameraGeometryType, DistortionType> calibrator(
+			geometries, grid, baselines, false, doBlakeZisserman);
 
-				size_t view_id = 0;
-				for (const auto &[timestamp, observation] : *(camTargetObservations.at(0))) {
-					std::map<size_t, aslam::cameras::GridCalibrationTargetObservation> targetViews;
-					targetViews.emplace(0, observation);
-					for (const auto &[cameraId, observations] : camTargetObservations) {
-						if (cameraId > 0) {
-							targetViews.emplace(cameraId, observations->at(timestamp));
-						}
-					}
-
-					bool success = calibrator.addTargetView(targetViews);
-
-					//                static constexpr bool allowEndFiltering = true;
-					const bool runEndFiltering             = (view_id == camTargetObservations.at(0)->size() - 1);
-					const auto numActiveBatches            = calibrator.getNumBatches();
-					static size_t numCams                  = geometries.size();
-					static constexpr size_t minViewOutlier = 20;
-					static constexpr bool removeOutliers   = true;
-					if (((success && numActiveBatches > minViewOutlier * numCams)
-							|| (runEndFiltering && numActiveBatches > minViewOutlier * numCams))) {
-						// create the list of the batches to check
-						std::vector<size_t> batches_to_check;
-						if (initOutlierRejection) {
-							// check all views after the min. number of batches has been reached
-							for (size_t i = 0; i < calibrator.getNumBatches(); ++i) {
-								batches_to_check.push_back(i);
-							}
-							std::cout << "calibrateIntrinsics: Filtering outliers in all batches" << std::endl;
-							initOutlierRejection = false;
-						}
-						else if (runEndFiltering) {
-							// check all batches again after all views have been processed
-							for (size_t i = 0; i < calibrator.getNumBatches(); ++i) {
-								batches_to_check.push_back(i);
-							}
-							std::cout << "calibrateIntrinsics: All views have been processed. Starting final outlier "
-										 "filtering..."
-									  << std::endl;
-						}
-						else {
-							// only check most recent view
-							batches_to_check.push_back(calibrator.getNumBatches() - 1);
-						}
-						std::sort(batches_to_check.rbegin(), batches_to_check.rend());
-
-						for (const auto &batch_id : batches_to_check) {
-							// check all cameras in this batch
-							std::vector<std::vector<size_t>> cornerRemovalList_allCams;
-							// only one camera (mono) is supported at the moment
-
-							for (size_t camId = 0; camId < numCams; camId++) {
-								// calculate the reprojection errors statistics
-								const auto reprojectionErrors = calibrator.getReprojectionErrors(camId);
-								const auto [me, se]           = getReprojectionErrorStatistics(reprojectionErrors);
-								const auto se_threshold       = 4.0 * se;
-								// select corners to remove
-								std::vector<size_t> cornerRemovalList;
-								for (size_t pidx = 0; pidx < reprojectionErrors.at(batch_id).size(); ++pidx) {
-									const auto reproj = reprojectionErrors.at(batch_id).at(pidx);
-									if ((reproj.size() != 0)
-										&& (std::abs(reproj(0, 0)) > se_threshold.x()
-											|| std::abs(reproj(1, 0)) > se_threshold.y())) {
-										cornerRemovalList.push_back(pidx);
-										++removedOutlierCornersCount;
-									}
-								}
-
-								// queue corners on this cam for removal
-								cornerRemovalList_allCams.push_back(cornerRemovalList);
-							}
-
-							// we do not plot
-
-							// remove the corners (if there are corners to be removed)
-							size_t removeCount = 0;
-							for (const auto &list : cornerRemovalList_allCams) {
-								removeCount += list.size();
-							}
-
-							if (removeCount > 0) {
-								for (size_t camId = 0; camId < numCams; camId++) {
-									if (cornerRemovalList_allCams.at(camId).empty()
-										|| calibrator.nOfViews() <= batch_id) {
-										continue;
-									}
-									auto new_batch = calibrator.removeCornersFromBatch(
-										batch_id, camId, cornerRemovalList_allCams.at(camId), doBlakeZisserman);
-
-									// replace the original batch with the corrected
-									calibrator.replaceBatch(batch_id, new_batch);
-								}
-							}
-						}
-					}
-
-					++view_id;
+		size_t view_id = 0;
+		for (const auto &[timestamp, observation] : *(camTargetObservations.at(0))) {
+			std::map<size_t, aslam::cameras::GridCalibrationTargetObservation> targetViews;
+			targetViews.emplace(0, observation);
+			for (const auto &[cameraId, observations] : camTargetObservations) {
+				if (cameraId > 0) {
+					targetViews.emplace(cameraId, observations->at(timestamp));
 				}
-
-				std::cout << "Crazy loop finished.. " << std::endl;
-				// final output
-
-				size_t cameraId = 0;
-				std::vector<CameraCalibrationUtils::CalibrationResult> results;
-				for (const auto &iccCamera : iccCameras) {
-					std::cout << std::endl << "Intrinsics Calibration complete." << std::endl << std::endl;
-					std::cout << "Removed " << removedOutlierCornersCount << " outlier corners." << std::endl;
-					std::cout << "Processed " << camTargetObservations[cameraId]->size() << " images with "
-							  << calibrator.getNumBatches() << " images used" << std::endl;
-					auto result = calibrator.getResult(cameraId);
-					CameraCalibrationUtils::printResult(result, std::cout);
-					CameraCalibrationInfo infoCam;
-					infoCam.numImagesTotal    = camTargetObservations[cameraId]->size();
-					infoCam.numImagesUsed     = calibrator.getNumBatches();
-					infoCam.numCornerOutliers = removedOutlierCornersCount;
-					mCameraCalibrationInfo.push_back(infoCam);
-					std::cout << std::endl;
-
-					iccCamera->updateIntrinsics(result.projection, result.distortion);
-
-					if (cameraId > 0) {
-						// Update baseline using the new intrinsics
-						auto &prevObservations = camTargetObservations.at(cameraId - 1);
-						auto &nextObservations = camTargetObservations.at(cameraId);
-						auto baseline          = estimateBaseline(
-                            geometries.at(cameraId - 1), geometries.at(cameraId), prevObservations, nextObservations);
-						result.baseline = baseline->T();
-					}
-
-					results.push_back(result);
-					cameraId++;
-				}
-
-				state = CalibratorUtils::CALIBRATED;
-				std::cout << "Finished calibration of intrinsics." << std::endl;
-
-				return results;
-			}
-			catch (const OptimizationDiverged &ex) {
-				fmt::print(
-					"Optimization diverged possibly due to bad initialization. (Do the models fit the lenses well?) "
-					"{0}",
-					ex.what());
-				state = CalibratorUtils::INITIALIZED;
-				// not trying to restart
-				break;
 			}
 
-			break; // Always break, restart on exception is not implemented
+			// Active batches correspond to target views that passed the incremental estimator step
+			bool success = calibrator.addTargetView(targetViews);
+
+			const bool runEndFiltering             = (view_id == camTargetObservations.at(0)->size() - 1);
+			const auto numActiveBatches            = calibrator.getNumBatches();
+			static size_t numCams                  = geometries.size();
+			static constexpr size_t minViewOutlier = 20;
+			static constexpr bool removeOutliers   = true;
+			static constexpr size_t MIN_NUMBER_CORNERS_TO_KEEP_BATCH = 4;
+			const bool sufficientBatches                             = numActiveBatches > minViewOutlier * numCams;
+			if (!(success && sufficientBatches) && !(runEndFiltering && sufficientBatches)) {
+				++view_id;
+				continue;
+			}
+
+			// Specify the first batch to check
+			size_t firstBatchIDToCheck;
+			if (initOutlierRejection) {
+				// check all views after the min. number of batches has been reached
+				firstBatchIDToCheck = 0;
+				std::cout << "calibrateIntrinsics: Filtering outliers in all batches" << std::endl;
+				initOutlierRejection = false;
+			}
+			else if (runEndFiltering) {
+				// check all batches again after all views have been processed
+				firstBatchIDToCheck = 0;
+				std::cout << "calibrateIntrinsics: All views have been processed. Starting final outlier "
+							 "filtering..."
+						  << std::endl;
+			}
+			else {
+				// only check most recent view
+				firstBatchIDToCheck = calibrator.getNumBatches() - 1;
+			}
+
+			// First index corresponds to the camera, second index to the batch for this camera, and last index to the
+			// actual corner index to remove
+			std::vector<std::vector<std::vector<size_t>>> cornerRemovalList_allCams;
+
+			for (size_t camId = 0; camId < numCams; camId++) {
+				// calculate the reprojection errors statistics
+				const auto reprojectionErrors = calibrator.getReprojectionErrors(camId);
+				const auto [me, se]           = getReprojectionErrorStatistics(reprojectionErrors);
+				const auto se_threshold       = 4.0 * se;
+				// select corners to remove from all batches to check in the active batches (starting from
+				// firstBatchIDToCheck)
+				std::vector<std::vector<size_t>> cornerRemovalList_checkedBatches;
+				for (size_t batch_id = firstBatchIDToCheck; batch_id < calibrator.getNumBatches(); ++batch_id) {
+					std::vector<size_t> cornerRemovalList;
+					for (size_t pidx = 0; pidx < reprojectionErrors.at(batch_id).size(); ++pidx) {
+						const auto reproj = reprojectionErrors.at(batch_id).at(pidx);
+						// Skip if no observation exists for current index
+						if (!reproj.has_value()) {
+							continue;
+						}
+
+						if ((std::abs(reproj->x()) > se_threshold.x()) || (std::abs(reproj->y()) > se_threshold.y())) {
+							cornerRemovalList.push_back(pidx);
+							++removedOutlierCornersCount;
+						}
+					}
+					cornerRemovalList_checkedBatches.push_back(cornerRemovalList);
+				}
+
+				// queue corners on this cam for removal
+				cornerRemovalList_allCams.push_back(cornerRemovalList_checkedBatches);
+			}
+
+			// Remove corners per camera and per batch
+			for (size_t camId = 0; camId < numCams; camId++) {
+				auto cornerRemovalList_checkedBatches = cornerRemovalList_allCams.at(camId);
+
+				size_t batch_id = firstBatchIDToCheck;
+				while (batch_id < calibrator.getNumBatches() && calibrator.getNumBatches() != 0) {
+					const size_t checkedBatchIdx    = batch_id - firstBatchIDToCheck;
+					const auto cornerRemovalList    = cornerRemovalList_checkedBatches.at(checkedBatchIdx);
+					const size_t numCurrentCorners  = calibrator.getNumCorners(batch_id, camId);
+					const size_t numCornersToRemove = cornerRemovalList.size();
+
+					if (numCornersToRemove > numCurrentCorners) {
+						throw std::runtime_error("In calibrator class, attempted to remove more "
+												 "corners than available observations");
+					}
+
+					if (numCornersToRemove == 0) {
+						++batch_id;
+						continue;
+					}
+
+					// If the new batch after removing corners contains too little observations to run
+					// PnP, remove batch entirely. Note that a batch contains all corners from all cameras
+					// at a given timestamp
+					if (numCurrentCorners - numCornersToRemove < MIN_NUMBER_CORNERS_TO_KEEP_BATCH) {
+						calibrator.removeBatch(batch_id);
+						cornerRemovalList_checkedBatches.erase(
+							cornerRemovalList_checkedBatches.begin() + checkedBatchIdx);
+						removedOutlierCornersCount += numCurrentCorners;
+						continue;
+					}
+
+					// replace the original batch with the corrected
+					auto new_batch
+						= calibrator.removeCornersFromBatch(batch_id, camId, cornerRemovalList, doBlakeZisserman);
+					// if a single camera doesn't succeed the replace batch, observations for all camera
+					// with that given ts will be removed from incremental estimator
+					const bool newBatchAccepted = calibrator.replaceBatch(batch_id, new_batch);
+					if (!newBatchAccepted) {
+						cornerRemovalList_checkedBatches.erase(
+							cornerRemovalList_checkedBatches.begin() + checkedBatchIdx);
+					}
+					else {
+						++batch_id;
+					}
+				}
+			}
+
+			++view_id;
 		}
 
-		return std::nullopt;
+		// TODO: add re-initialization logic if optimization diverges
+
+		std::cout << "Crazy loop finished.. " << std::endl;
+		// final output
+
+		size_t cameraId = 0;
+		std::vector<CameraCalibrationUtils::CalibrationResult> results;
+		for (const auto &iccCamera : iccCameras) {
+			std::cout << std::endl << "Intrinsics Calibration complete." << std::endl << std::endl;
+			std::cout << "Removed " << removedOutlierCornersCount << " outlier corners." << std::endl;
+			std::cout << "Processed " << camTargetObservations[cameraId]->size() << " images with "
+					  << calibrator.getNumBatches() << " images used" << std::endl;
+			auto result = calibrator.getResult(cameraId);
+			CameraCalibrationUtils::printResult(result, std::cout);
+			CameraCalibrationInfo infoCam;
+			infoCam.numImagesTotal    = camTargetObservations[cameraId]->size();
+			infoCam.numImagesUsed     = calibrator.getNumBatches();
+			infoCam.numCornerOutliers = removedOutlierCornersCount;
+			mCameraCalibrationInfo.push_back(infoCam);
+			std::cout << std::endl;
+
+			iccCamera->updateIntrinsics(result.projection, result.distortion);
+
+			if (cameraId > 0) {
+				// Update baseline using the new intrinsics
+				auto &prevObservations = camTargetObservations.at(cameraId - 1);
+				auto &nextObservations = camTargetObservations.at(cameraId);
+				auto baseline          = estimateBaseline(
+                    geometries.at(cameraId - 1), geometries.at(cameraId), prevObservations, nextObservations);
+				result.baseline = baseline->T();
+			}
+
+			results.push_back(result);
+			cameraId++;
+		}
+
+		state = CalibratorUtils::CALIBRATED;
+		std::cout << "Finished calibration of intrinsics." << std::endl;
+
+		return results;
 	}
 
 	/**

@@ -18,12 +18,12 @@
  * calibration grid.
  */
 template<typename CameraGeometryType>
-std::vector<std::vector<Eigen::Vector2d>> computeReprojectionErrors(
+std::vector<std::vector<std::optional<Eigen::Vector2d>>> computeReprojectionErrors(
 	const std::vector<aslam::cameras::GridCalibrationTargetObservation> &observedKeypoints,
 	const boost::shared_ptr<aslam::cameras::GridCalibrationTargetBase> &worldLandmarks,
 	const boost::shared_ptr<CameraGeometryType> &cameraGeometry) {
 	// Construct vector of vectors of reprojection errors
-	std::vector<std::vector<Eigen::Vector2d>> reprojectionErrors;
+	std::vector<std::vector<std::optional<Eigen::Vector2d>>> reprojectionErrors;
 
 	// Iterate over all observations of the calibration grid. obs contains all observed 2D keypoints for a given
 	// observation of the calibration grid
@@ -36,13 +36,14 @@ std::vector<std::vector<Eigen::Vector2d>> computeReprojectionErrors(
 		const auto T_cam_w = T_t_c.inverse();
 
 		// Use the computed transformation to reproject each 3D landmark to the camera frame
-		std::vector<Eigen::Vector2d> reprojectionErrorPerGrid;
+		std::vector<std::optional<Eigen::Vector2d>> reprojectionErrorPerGrid;
 		for (size_t i = 0; i < worldLandmarks->size(); ++i) {
 			// Extract the observed 2D keypoint from the set of observations
 			Eigen::Vector2d detectedImagePoint;
 			const bool success = obs.imagePoint(i, detectedImagePoint);
-			// If no observation exists for the given 3D landmark, skip
+			// If no observation exists for the given 3D landmark, add nullopt to reprojection error
 			if (!success) {
+				reprojectionErrorPerGrid.push_back(std::nullopt);
 				continue;
 			}
 
@@ -75,14 +76,22 @@ std::vector<std::vector<Eigen::Vector2d>> computeReprojectionErrors(
  * @return Average reprojection error norm (L2 norm) for each observation of the calibration grid.
  */
 std::vector<double> computeReprojectionErrorNormsPerGrid(
-	const std::vector<std::vector<Eigen::Vector2d>> &reprojectionErrors) {
+	const std::vector<std::vector<std::optional<Eigen::Vector2d>>> &reprojectionErrors) {
 	std::vector<double> reprojectionErrorNorms;
 	for (const auto &reprojectionErrorPerGrid : reprojectionErrors) {
 		double averageErrorNormPerGrid = 0;
+		size_t numObservedCorners      = 0;
 		for (const auto &reprojectionError : reprojectionErrorPerGrid) {
-			averageErrorNormPerGrid += reprojectionError.norm(); // L2 Norm
+			if (reprojectionError.has_value()) {
+				averageErrorNormPerGrid += reprojectionError->norm(); // L2 Norm
+				++numObservedCorners;
+			}
 		}
-		averageErrorNormPerGrid /= static_cast<double>(reprojectionErrorPerGrid.size());
+		if (numObservedCorners == 0) {
+			throw std::runtime_error("Trying to compute reprojection error for target with no detected keypoints");
+		}
+
+		averageErrorNormPerGrid /= static_cast<double>(numObservedCorners);
 		reprojectionErrorNorms.push_back(averageErrorNormPerGrid);
 	}
 	return reprojectionErrorNorms;
@@ -118,7 +127,7 @@ std::tuple<double, double> meanStd(const std::vector<double> &vals) {
  * @return Mean and standard deviation of the reprojection error per x/y coordinates.
  */
 std::tuple<Eigen::Vector2d, Eigen::Vector2d> getReprojectionErrorStatistics(
-	const std::vector<std::vector<Eigen::Vector2d>> &all_rerrs) {
+	const std::vector<std::vector<std::optional<Eigen::Vector2d>>> &all_rerrs) {
 	std::vector<double> xVals, yVals;
 	for (const auto &view_rerrs : all_rerrs) {
 		if (view_rerrs.empty()) {
@@ -126,8 +135,11 @@ std::tuple<Eigen::Vector2d, Eigen::Vector2d> getReprojectionErrorStatistics(
 		}
 
 		for (const auto &rerr : view_rerrs) {
-			xVals.push_back(rerr.x());
-			yVals.push_back(rerr.y());
+			if (!rerr.has_value()) {
+				continue;
+			}
+			xVals.push_back(rerr->x());
+			yVals.push_back(rerr->y());
 		}
 	}
 

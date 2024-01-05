@@ -166,7 +166,7 @@ protected:
 
 		// verbose output
 		auto printReprErrors = [&](const std::string &prefix) {
-			const std::vector<std::vector<Eigen::Vector2d>> reprojectionErrors
+			const std::vector<std::vector<std::optional<Eigen::Vector2d>>> reprojectionErrors
 				= computeReprojectionErrors<CameraGeometryType>(obslist, target, iccCamera->getCameraGeometry());
 			const std::vector<double> reprojectionErrorNorms = computeReprojectionErrorNormsPerGrid(reprojectionErrors);
 			const auto [mean, std]                           = meanStd(reprojectionErrorNorms);
