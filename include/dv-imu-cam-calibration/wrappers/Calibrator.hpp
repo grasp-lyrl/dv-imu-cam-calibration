@@ -530,6 +530,7 @@ public:
 		dv::runtime_assert(geometries.size() == iccCameras.size(), "Wrong camera count initialized for calibration");
 
 		// 3) remove corners with too big RE, then update intrinsics and baselines based on "refined batches"
+#if WITH_KALIBR_FILTERING
 		std::cout << "3) REMOVE CORNERS WITH TOO BIG RE, THEN UPDATE INTRNSICS AND BASELINES USING REFINED BATCHES"
 				  << std::endl;
 		size_t removedOutlierCornersCount = 0u;
@@ -706,7 +707,18 @@ public:
 
 		state = CalibratorUtils::CALIBRATED;
 		std::cout << "Finished calibration of intrinsics." << std::endl;
+#else
+		std::cout << "Finished calibration without running kalibr filtering for intrinsics." << std::endl;
 
+		CameraCalibration<CameraGeometryType, DistortionType> calibrator(
+			geometries, grid, baselines, false, doBlakeZisserman);
+
+		std::vector<CameraCalibrationUtils::CalibrationResult> results;
+		for (int cameraId = 0; cameraId < iccCameras.size(); cameraId++) {
+			auto result = calibrator.getResult(cameraId);
+			results.push_back(result);
+		}
+#endif
 		return results;
 	}
 
