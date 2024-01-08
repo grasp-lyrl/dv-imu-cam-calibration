@@ -14,11 +14,6 @@
 #include <string>
 #include <thread>
 
-#if WITH_IMU_CALIBRATION
-#	define ENABLE_IMU true
-#else
-#	define ENABLE_IMU false
-#endif
 namespace pt = boost::property_tree;
 namespace fs = std::filesystem;
 
@@ -59,7 +54,7 @@ protected:
 
 	CollectionState collectionState = BEFORE_COLLECTING;
 
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 	static std::optional<double> estimateFrequency(const std::vector<int64_t> &timestamps) {
 		std::vector<double> freq;
 		if (timestamps.size() < 2) {
@@ -121,7 +116,7 @@ public:
 	static void initInputs(dv::InputDefinitionList &in) {
 		in.addFrameInput("left");
 		in.addFrameInput("right", true);
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 		in.addIMUInput("imu", true);
 #endif
 	}
@@ -170,7 +165,7 @@ public:
 		// Optimization options
 		config.add("maxIter",
 			dv::ConfigOption::intOption("Maximum number of iteration of calibration optimization problem", 50, 1, 100));
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 		config.add("timeCalibration",
 			dv::ConfigOption::boolOption("If true, time offset between the sensors will be calibrated", true));
 #endif
@@ -218,7 +213,7 @@ public:
 
 					collectionState  = CALIBRATING;
 					mThreadCalibrate = std::thread([&]() {
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 						calibrate(inputs.isConnected("imu"));
 #else
 						calibrate(false);
@@ -338,7 +333,7 @@ public:
 
 		mOptions.maxIter = static_cast<size_t>(config.getInt("maxIter"));
 
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 		mOptions.timeCalibration = config.getBool("timeCalibration");
 
 		if (imuUpdateRate.has_value()) {
@@ -351,7 +346,7 @@ public:
 		if (config.getBool("recordData")) {
 			mWriterConfig.cameraName = getCameraID("left");
 			mWriterConfig.addFrameStream(frameInput.size(), "frames");
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 			if (inputs.getIMUInput("imu").isConnected()) {
 				mWriterConfig.addImuStream("imu");
 			}
@@ -380,7 +375,7 @@ public:
 			outputs.getFrameOutput("right").setup(inputs.getFrameInput("left"));
 		}
 
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 		// If imu input is connected, do not initialize and wait until imu frequency is estimated
 		if (!inputs.getIMUInput("imu").isConnected()) {
 			initializeCalibrator();
@@ -446,7 +441,7 @@ public:
 		writeDataLogBuffer(1000000);
 	}
 
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 	std::optional<size_t> estimateImuFrequency(const dv::IMUPacket &packet) {
 		for (const auto &measurement : packet.elements) {
 			mTimes.push_back(measurement.timestamp);
@@ -475,7 +470,7 @@ public:
 			handleCollectionState();
 		}
 
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 		// Process IMU input
 		if (inputs.isConnected("imu")) {
 			auto imuInput = inputs.getIMUInput("imu");
@@ -560,7 +555,7 @@ public:
 			auto previews = mCalibrator->getPreviewImages();
 			if (!previews.empty()) {
 				if (collectionState == BEFORE_COLLECTING) {
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 					if (!inputs.isConnected("imu")) {
 						cv::putText(previews[0].image, "No IMU data", cv::Point(20, previews[0].image.rows - 20),
 							cv::FONT_HERSHEY_DUPLEX, 1.0, cv::Scalar(0, 165, 255), 2);
@@ -672,7 +667,7 @@ protected:
 		return {frameInput.sizeX(), frameInput.sizeY()};
 	}
 
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 	std::tuple<float, float, cv::Point3f, cv::Point3f, float, float, float, float, float, float>
 		getIMUCharacteristics() {
 		float omega_max, acc_max, omega_offset_var, acc_offset_var, omega_noise_density, acc_noise_density,
@@ -801,7 +796,7 @@ protected:
 					 << dv::logEnd;
 		}
 
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 		calib.addImuCalibration(getIMUCalibrationData(result));
 #endif
 
@@ -831,7 +826,7 @@ protected:
 				"Failed to calibrate intrinsics! Please check that the pattern was well detected on the images");
 		}
 
-#if ENABLE_IMU
+#if WITH_IMU_CALIBRATION
 		if (calibrateImu) {
 			outLog << "Building the problem..." << std::endl;
 			mCalibrator->buildProblem();

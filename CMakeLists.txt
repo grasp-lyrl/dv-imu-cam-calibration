@@ -19,6 +19,16 @@ ELSE()
 	ADD_DEFINITIONS(-DWITH_IMU_CALIBRATION=0)
 ENDIF()
 
+OPTION(
+	ENABLE_KALIBR_FILTERING
+	"During intrinsics computation, enable intrinsics refinement by filtering detection and using incremental optimization on filtered data"
+	ON)
+IF(ENABLE_KALIBR_FILTERING)
+	ADD_DEFINITIONS(-DWITH_KALIBR_FILTERING=1)
+ELSE()
+	ADD_DEFINITIONS(-DWITH_KALIBR_FILTERING=0)
+ENDIF()
+
 # Note: keep this find package before flags visibility presets to avoid linking error in dv runtime for kalibr .so files
 FIND_PACKAGE(dv 1.5.2 REQUIRED)
 
