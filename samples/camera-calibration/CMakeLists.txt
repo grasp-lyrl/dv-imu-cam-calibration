@@ -16,5 +16,20 @@ IF(NOT TARGET kalibr_imu_camera_calibration)
 ENDIF()
 
 ADD_EXECUTABLE(run-camera-calibration run_camera_calibration.cpp)
-
 TARGET_LINK_LIBRARIES(run-camera-calibration PRIVATE kalibr_imu_camera_calibration dv::processing CLI11::CLI11)
+
+ADD_EXECUTABLE(run-camera-calibration-all-methods run_camera_calibration_all_methods.cpp)
+TARGET_LINK_LIBRARIES(run-camera-calibration-all-methods PRIVATE kalibr_imu_camera_calibration dv::processing
+																 CLI11::CLI11)
+
+ADD_EXECUTABLE(run-camera-calibration-all-recordings run_camera_calibration_all_recordings.cpp)
+TARGET_LINK_LIBRARIES(run-camera-calibration-all-recordings PRIVATE kalibr_imu_camera_calibration dv::processing
+																	CLI11::CLI11)
+
+ADD_EXECUTABLE(run-camera-calibration-all-patterns run_camera_calibration_all_patterns.cpp)
+TARGET_LINK_LIBRARIES(run-camera-calibration-all-patterns PRIVATE kalibr_imu_camera_calibration dv::processing
+																  CLI11::CLI11)
+
+ADD_EXECUTABLE(run-camera-calibration-all-devices run_camera_calibration_all_devices.cpp)
+TARGET_LINK_LIBRARIES(run-camera-calibration-all-devices PRIVATE kalibr_imu_camera_calibration dv::processing
+																 CLI11::CLI11)

@@ -1,6 +1,5 @@
-#include "run_camera_calibration.hpp"
-
 #include "CLI/CLI.hpp"
+#include "run_camera_calibration.hpp"
 
 int main(int ac, char **av) {
 	std::string framesPath;
@@ -10,12 +9,16 @@ int main(int ac, char **av) {
 	int32_t height;
 
 	// Use CLI11 library to handle argument parsing
-	CLI::App app{"Runs camera calibration from a single recording's frame reconstruction given provided sensor and "
-				 "pattern info."};
+	CLI::App app{"Runs camera calibration from all different recordings from the same pattern given "
+				 "provided sensor and pattern info."};
 	app.add_option("-f,--framesPath", framesPath,
-		   "Path to file containing frames with patterns to be detected for calibration.")
+		   "Full path to folder (ex: april-tag-0.5m) containing multiple recordings (ex: rec1, rec2, rec3) using the "
+		   "same pattern.")
 		->required();
-	app.add_option("-o,--outputFile", outputFilepath, "Path to file where to save the calibration.")->required();
+	app.add_option("-o,--outputFolder", outputFilepath,
+		   "Path to folder that will contain all different calibration files, each one will contain the calibration "
+		   "obtained from a single set of frames.")
+		->required();
 	app.add_option("-p,--pattern", patternPath,
 		   "Path to json file containing calibration pattern information (name, shape, dimensions)")
 		->required();
@@ -29,7 +32,7 @@ int main(int ac, char **av) {
 		return app.exit(e);
 	}
 
-	runCameraCalibration(framesPath, outputFilepath, patternPath, width, height);
+	runCameraCalibrationForAllRecordings(framesPath, outputFilepath, patternPath, width, height);
 
 	return EXIT_SUCCESS;
 }
