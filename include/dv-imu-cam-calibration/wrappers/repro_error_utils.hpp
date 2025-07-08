@@ -111,7 +111,7 @@ std::tuple<double, double> meanStd(const std::vector<double> &vals) {
 
 	double stdSum = 0.0;
 	for (const auto &val : vals) {
-		double diff = val - mean;
+		double diff  = val - mean;
 		stdSum      += diff * diff;
 	}
 	double std = sqrt(stdSum / (static_cast<double>(vals.size() - 1)));

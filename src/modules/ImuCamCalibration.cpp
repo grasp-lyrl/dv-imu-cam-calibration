@@ -402,7 +402,12 @@ public:
 		auto detection = mCalibrator->getLatestObservations();
 		if (!detection.first.empty() && !detection.second.empty()) {
 			dv::runtime_assert(
-				detection.first.size() == detection.second.size(), "Observation count does not match image count!");
+				[&detection] {
+					return detection.first.size() == detection.second.size();
+				},
+				[] {
+					return "Observation count does not match image count!";
+				});
 		}
 		else {
 			return;

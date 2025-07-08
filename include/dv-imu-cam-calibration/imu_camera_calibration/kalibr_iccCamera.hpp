@@ -275,7 +275,7 @@ public:
 			dt += times[i + 1] - times[i];
 		}
 		dt           /= static_cast<double>(times.size() - 1);
-		double shift = -static_cast<double>(discrete_shift) * dt;
+		double shift  = -static_cast<double>(discrete_shift) * dt;
 
 		timeshiftCamToImuPrior = shift;
 

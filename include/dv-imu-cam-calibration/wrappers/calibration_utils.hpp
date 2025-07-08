@@ -164,10 +164,10 @@ dv::camera::calibrations::CameraCalibration getIntrinsicCalibrationData(
 
 	dv::camera::DistortionModel distortionModel;
 	if constexpr (std::is_same<DistortionType, aslam::cameras::EquidistantDistortion>()) {
-		distortionModel = dv::camera::DistortionModel::Equidistant;
+		distortionModel = dv::camera::DistortionModel::EQUIDISTANT;
 	}
 	if constexpr (std::is_same<DistortionType, aslam::cameras::RadialTangentialDistortion>()) {
-		distortionModel = dv::camera::DistortionModel::RadTan;
+		distortionModel = dv::camera::DistortionModel::RADIAL_TANGENTIAL;
 	}
 	else {
 		throw std::runtime_error("Unexpected distortion model type provided. Currently, only Radial tangential and "
@@ -178,8 +178,7 @@ dv::camera::calibrations::CameraCalibration getIntrinsicCalibrationData(
 		cv::Point2f(static_cast<float>(res.projection.at(2)), static_cast<float>(res.projection.at(3))),
 		cv::Point2f(static_cast<float>(res.projection.at(0)), static_cast<float>(res.projection.at(1))),
 		std::vector<float>(res.distortion.begin(), res.distortion.end()), distortionModel,
-		std::vector<float>(floatTransform.data(), floatTransform.data() + 16),
-		getCameraCalibrationMetadata(res, patternInfo, comment));
+		dv::kinematics::Transformationf{0, floatTransform}, getCameraCalibrationMetadata(res, patternInfo, comment));
 
 	return cal;
 }
@@ -196,9 +195,9 @@ struct StampedImage {
 	cv::Mat image;
 	int64_t timestamp;
 
-	StampedImage(){};
+	StampedImage() {};
 
-	StampedImage(cv::Mat img, const int64_t ts) : image(std::move(img)), timestamp(ts){};
+	StampedImage(cv::Mat img, const int64_t ts) : image(std::move(img)), timestamp(ts) {};
 
 	/**
 	 * Clone the underlying image.

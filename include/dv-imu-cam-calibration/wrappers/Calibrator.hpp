@@ -189,7 +189,13 @@ public:
 			camId++;
 		}
 
-		assert(iccCameras.size() > 0);
+		dv::runtime_assert(
+			[this] {
+				return iccCameras.size() > 0;
+			},
+			[] {
+				return "iccCameras cannot be empty.";
+			});
 		mCameraCalibrationInfo.reserve(iccCameras.size());
 
 		iccImu = boost::make_shared<IccImu>(calibratorOptions.imuParameters, imuData);
@@ -405,10 +411,10 @@ public:
 		uint sum(0);
 		for (ForwardIterator it = begin; it != end; ++it) {
 			Eigen::Matrix<DataType, 1, 4> q(1, 4);
-			q(0) = it->w();
-			q(1) = it->x();
-			q(2) = it->y();
-			q(3) = it->z();
+			q(0)  = it->w();
+			q(1)  = it->x();
+			q(2)  = it->y();
+			q(3)  = it->z();
 			A    += q.transpose() * q;
 			sum++;
 		}
@@ -435,7 +441,13 @@ public:
 		const boost::shared_ptr<CameraGeometry<CameraGeometryType, DistortionType>> &c1,
 		const IccCameraUtils::ObservationsPtr &obs0, const IccCameraUtils::ObservationsPtr &obs1) {
 		// For each observation
-		dv::runtime_assert(obs0->size() == obs1->size(), "Number of observations in both camera should be the same");
+		dv::runtime_assert(
+			[&obs0, &obs1] {
+				return obs0->size() == obs1->size();
+			},
+			[] {
+				return "Number of observations in both camera should be the same";
+			});
 
 		Eigen::Vector3d translationSum = Eigen::Vector3d::Zero();
 		std::vector<Eigen::Quaterniond> quaternions;
@@ -527,10 +539,16 @@ public:
 			}
 		}
 
-		dv::runtime_assert(geometries.size() == iccCameras.size(), "Wrong camera count initialized for calibration");
+		dv::runtime_assert(
+			[this, &geometries] {
+				return geometries.size() == iccCameras.size();
+			},
+			[] {
+				return "Wrong camera count initialized for calibration";
+			});
 
 		// 3) remove corners with too big RE, then update intrinsics and baselines based on "refined batches"
-		std::cout << "3) REMOVE CORNERS WITH TOO BIG RE, THEN UPDATE INTRNSICS AND BASELINES USING REFINED BATCHES"
+		std::cout << "3) REMOVE CORNERS WITH TOO BIG RE, THEN UPDATE INTRINSICS AND BASELINES USING REFINED BATCHES"
 				  << std::endl;
 		size_t removedOutlierCornersCount = 0u;
 
@@ -881,7 +899,13 @@ protected:
 	 * @param stampedImage
 	 */
 	void detectPattern(const std::vector<CalibratorUtils::StampedImage> &frames) override {
-		dv::runtime_assert(frames.size() == iccCameras.size(), "Wrong number of frames passed for detection");
+		dv::runtime_assert(
+			[this, &frames] {
+				return frames.size() == iccCameras.size();
+			},
+			[] {
+				return "Wrong number of frames passed for detection";
+			});
 
 		std::vector<aslam::cameras::GridCalibrationTargetObservation> observations;
 		std::vector<bool> successes;

@@ -1,4 +1,4 @@
-# Camera-IMU calibration \[Tutorial\]
+# Camera-IMU calibration [Tutorial]
 
 ## Goals
 
