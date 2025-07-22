@@ -24,7 +24,7 @@ sudo make install
 
 ## Usage
 
-- calibrate your camera using DV [calibration](https://inivation.gitlab.io/dv/dv-docs/docs/tutorial-calibration/)
+- calibrate your camera using DV [calibration](https://docs.inivation.com/software/dv/gui/calibrate-event-camera.html)
 - adjust the module configuration
   - adjust your camera input IMU rate for BOTH calibration module AND camera input module (recommended 200Hz)
   - set the path to your DV camera calibration file
