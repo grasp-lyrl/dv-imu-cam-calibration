@@ -19,21 +19,18 @@ default:
 # Edit the cmake line as needed to enable your app's standard configuration for testing.
 .ubuntu_curr_builder: &ubuntu_curr_builder
   stage: build
-  image: registry.gitlab.com/inivation/infra/docker-files/ubuntu:rolling
+  image: registry.gitlab.com/synsense-sys-int/inivation/infra/docker-files/ubuntu:rolling
   # Variables is not getting merged, so we use before_script to set CCACHE vars.
   before_script:
     - export CCACHE_DIR="${CI_PROJECT_DIR}/.ccache"
     - export CCACHE_BASEDIR="${CI_PROJECT_DIR}"
     - export CCACHE_COMPILERCHECK="content"
     - apt update
-    - apt-get -y install libcaer-dev dv-runtime-dev
-    - pip install cmakelang
-    - pip install clang-format
-
+    - apt-get -y install dv-runtime-dev
   script:
     - *change_build_dir
     - cmake -DCMAKE_INSTALL_PREFIX=/usr -DIMU_CAM_CALIB_ENABLE_TESTS=ON -DIMU_CAM_CALIB_ENABLE_SAMPLES=ON ..
-    - make -j7
+    - make -j4 -s
     - CTEST_OUTPUT_ON_FAILURE=1 ctest --verbose
   rules:
     - if: $CI_MERGE_REQUEST_ID
@@ -44,44 +41,27 @@ default:
       - .ccache
     policy: pull-push
 
-# Build and test on GCC 11.
-build_and_test_on_gcc11:
+# Build and test on GCC 13.
+build_and_test_on_gcc13:
   variables:
-    CC: gcc-11
-    CXX: g++-11
+    CC: gcc-13
+    CXX: g++-13
     CTEST_OUTPUT_ON_FAILURE: 1
   <<: *ubuntu_curr_builder
 
-# Build and test on clang 16.
-build_and_test_on_clang16:
+# Build and test on clang 18.
+build_and_test_on_clang18:
   variables:
-    CC: clang-16
-    CXX: clang++-16
+    CC: clang-18
+    CXX: clang++-18
     CTEST_OUTPUT_ON_FAILURE: 1
   <<: *ubuntu_curr_builder
-
-basic_syntax_check_clang:
-  variables:
-    # Oldest supported clang compiler.
-    # Must be clang 13 as 12 has compile issues with libstdc++-12.
-    CC: clang-13
-    CXX: clang++-13
-  <<: *ubuntu_curr_builder
-  script:
-    # Generate header files.
-    - cmake -DCMAKE_INSTALL_PREFIX=/usr .
-    # Check syntax. This will ensure each header file can be compiled on its own,
-    # preventing any missing header dependencies or syntax errors.
-    # TODO(giovanni): add this check ones repo struct is properly refactored
-    # - find include/ -type f -iname '*.hpp' | sort -u > headers.txt
-    # - find include/ -type f -iname '*.h' | sort -u >> headers.txt
-    # - for h in $(cat headers.txt) ; do echo "\nChecking === ${h}\n\n" ; ${CXX} -std=c++20 -O2 -pipe "${h}" $(pkg-config --cflags opencv4) $(pkg-config --cflags eigen3) -I include/ ; rm "${h}.gch" ; done
 
 # Run pre-commit on all files to make sure it was run on client.
 # This will do all formatting checks in a consistent way.
 pre-commit_check:
   stage: build
-  image: registry.gitlab.com/inivation/infra/docker-files/ubuntu:rolling
+  image: registry.gitlab.com/synsense-sys-int/inivation/infra/docker-files/ubuntu:rolling
   before_script:
     - pre-commit install
   script:
