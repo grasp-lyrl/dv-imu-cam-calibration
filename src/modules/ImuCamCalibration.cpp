@@ -19,7 +19,8 @@ namespace fs = std::filesystem;
 
 std::string getTimeString() {
 	return fmt::format("{:%Y-%m-%dT%H-%M-%SZ}",
-		fmt::localtime(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())));
+		std::chrono::current_zone()->to_local(
+			std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now())));
 }
 
 class ImuCamCalibration : public dv::ModuleBase {
@@ -717,13 +718,7 @@ protected:
 		const IccCalibratorUtils::CalibrationResult &result) {
 		const auto &[om, am, ooavg, aoavg, oovar, aovar, onden, anden, onrw, anrw] = getIMUCharacteristics();
 
-		std::vector<float> transData;
-		transData.reserve(16);
-		for (long row = 0; row < result.T_cam_imu.rows(); ++row) {
-			for (long col = 0; col < result.T_cam_imu.cols(); ++col) {
-				transData.push_back(static_cast<float>(result.T_cam_imu(row, col)));
-			}
-		}
+		dv::kinematics::Transformationf transData{0, result.T_cam_imu.cast<float>()};
 
 		std::stringstream ssCom;
 		ssCom << "Time offset usage: t_correct = t_imu - offset"

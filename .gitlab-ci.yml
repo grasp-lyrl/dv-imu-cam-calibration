@@ -29,7 +29,7 @@ default:
     - apt-get -y install dv-runtime-dev
   script:
     - *change_build_dir
-    - cmake -DCMAKE_INSTALL_PREFIX=/usr -DIMU_CAM_CALIB_ENABLE_TESTS=ON -DIMU_CAM_CALIB_ENABLE_SAMPLES=ON ..
+    - cmake -DCMAKE_INSTALL_PREFIX=/usr -DIMU_CAM_CALIB_ENABLE_TESTS=ON -DIMU_CAM_CALIB_ENABLE_SAMPLES=ON -DENABLE_IMU=ON -DENABLE_KALIBR_FILTERING=ON ..
     - make -j4 -s
     - CTEST_OUTPUT_ON_FAILURE=1 ctest --verbose
   rules:
