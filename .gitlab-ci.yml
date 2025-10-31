@@ -19,7 +19,8 @@ default:
 # Edit the cmake line as needed to enable your app's standard configuration for testing.
 .ubuntu_curr_builder: &ubuntu_curr_builder
   stage: build
-  image: registry.gitlab.com/synsense-sys-int/inivation/infra/docker-files/ubuntu:rolling
+  # Kalibr requires Ubuntu 22.04 or older.
+  image: registry.gitlab.com/synsense-sys-int/inivation/infra/docker-files/ubuntu:22.04
   # Variables is not getting merged, so we use before_script to set CCACHE vars.
   before_script:
     - export CCACHE_DIR="${CI_PROJECT_DIR}/.ccache"
