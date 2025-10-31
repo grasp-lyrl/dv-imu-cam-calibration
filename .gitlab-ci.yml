@@ -25,7 +25,7 @@ default:
     - export CCACHE_DIR="${CI_PROJECT_DIR}/.ccache"
     - export CCACHE_BASEDIR="${CI_PROJECT_DIR}"
     - export CCACHE_COMPILERCHECK="content"
-    - apt update
+    - apt-add-repository 'ppa:inivation-ppa/inivation' && apt-get -y update
     - apt-get -y install dv-runtime-dev
   script:
     - *change_build_dir
