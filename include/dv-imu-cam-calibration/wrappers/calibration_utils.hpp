@@ -239,6 +239,7 @@ struct Options {
 	// Optimization problem
 	size_t maxIter       = 20;
 	bool timeCalibration = true;
+	double timeOffsetPadding = 0.5;
 
 	// IMU
 	ImuParameters imuParameters;

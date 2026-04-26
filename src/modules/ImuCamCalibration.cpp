@@ -170,6 +170,9 @@ public:
 #if WITH_IMU_CALIBRATION
 		config.add("timeCalibration",
 			dv::ConfigOption::boolOption("If true, time offset between the sensors will be calibrated", true));
+		config.add("timeOffsetPadding",
+			dv::ConfigOption::floatOption(
+				"Padding in seconds used for camera/IMU spline time bounds during time calibration", 0.5, 0.0, 5.0));
 #endif
 
 		// IMU noise parameters
@@ -338,6 +341,7 @@ public:
 
 #if WITH_IMU_CALIBRATION
 		mOptions.timeCalibration = config.getBool("timeCalibration");
+		mOptions.timeOffsetPadding = static_cast<double>(config.getFloat("timeOffsetPadding"));
 
 		if (imuUpdateRate.has_value()) {
 			mOptions.imuParameters.updateRate = *imuUpdateRate;

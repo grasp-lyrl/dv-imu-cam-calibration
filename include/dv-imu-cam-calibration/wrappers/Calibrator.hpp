@@ -68,6 +68,11 @@ protected:
 
 	std::vector<boost::shared_ptr<aslam::cameras::GridDetector>> detectors;
 
+	// Timestamp rebasing origin for the current collection session [us].
+	bool hasTimeOriginUs = false;
+	int64_t timeOriginUs = 0;
+	mutable std::mutex timeOriginMutex;
+
 	// Colors used in visualization of detected calibtion pattern
 	const std::vector<cv::Scalar> colors{cv::Scalar(255, 0, 0), cv::Scalar(128, 0, 0), cv::Scalar(0, 255, 0),
 		cv::Scalar(0, 128, 0), cv::Scalar(0, 0, 255), cv::Scalar(0, 0, 128), cv::Scalar(255, 255, 0),
@@ -77,6 +82,23 @@ protected:
 		cv::Scalar(128, 0, 128), cv::Scalar(0, 255, 128), cv::Scalar(0, 128, 128)};
 
 public:
+	int64_t getRebasedTimestampUs(const int64_t timestamp) {
+		std::lock_guard<std::mutex> lock(timeOriginMutex);
+		if (!hasTimeOriginUs) {
+			timeOriginUs    = timestamp;
+			hasTimeOriginUs = true;
+		}
+		return timestamp - timeOriginUs;
+	}
+
+	int64_t getRebasedTimestampUsIfInitialized(const int64_t timestamp) const {
+		std::lock_guard<std::mutex> lock(timeOriginMutex);
+		if (!hasTimeOriginUs) {
+			return timestamp;
+		}
+		return timestamp - timeOriginUs;
+	}
+
 	/**
 	 * Constructor.
 	 */
@@ -220,12 +242,13 @@ public:
 	 * Add IMU measurement to the calibration buffer.
 	 */
 	void addImu(const int64_t timestamp, const Eigen::Vector3d &gyro, const Eigen::Vector3d &acc) override {
-		const double tsS  = static_cast<double>(timestamp) / 1e6;
-		const auto Rgyro  = Eigen::Matrix3d::Identity() * iccImu->getGyroUncertaintyDiscrete();
-		const auto Raccel = Eigen::Matrix3d::Identity() * iccImu->getAccelUncertaintyDiscrete();
-		IccImuUtils::ImuMeasurement imuMeas(tsS, gyro, acc, Rgyro, Raccel);
-
 		if (state == CalibratorUtils::COLLECTING) {
+			const auto rebasedTsUs = getRebasedTimestampUs(timestamp);
+			const double tsS       = CalibratorUtils::toSec(rebasedTsUs);
+			const auto Rgyro       = Eigen::Matrix3d::Identity() * iccImu->getGyroUncertaintyDiscrete();
+			const auto Raccel      = Eigen::Matrix3d::Identity() * iccImu->getAccelUncertaintyDiscrete();
+			IccImuUtils::ImuMeasurement imuMeas(tsS, gyro, acc, Rgyro, Raccel);
+
 			std::lock_guard<std::mutex> lock(imuDataMutex);
 			imuData->push_back(imuMeas);
 		}
@@ -351,7 +374,8 @@ public:
 
 			if (obs != nullptr) {
 				// rounding between double and int64 timestamp can cause a small difference
-				const auto timeDiff = std::abs(obs->time().toDvTime() - latestImage.timestamp);
+				const auto rebasedTimestamp = getRebasedTimestampUsIfInitialized(latestImage.timestamp);
+				const auto timeDiff         = std::abs(obs->time().toDvTime() - rebasedTimestamp);
 				if (timeDiff <= 1) {
 					cv::Point prevPoint(-1, -1);
 					for (size_t y = 0; y < grid->rows(); ++y) {
@@ -769,7 +793,7 @@ public:
 		std::cout << "Calibrating using " << camTargetObservations.at(0)->size() << " detections." << std::endl;
 
 		iccCalibrator->buildProblem(6, 100, 50, 1e6, 1e5, true, -1, -1, -1, !calibratorOptions.timeCalibration, true,
-			calibratorOptions.maxIter, 1.0, 1.0, 0.03, false);
+			calibratorOptions.maxIter, 1.0, 1.0, calibratorOptions.timeOffsetPadding, false);
 	}
 
 	/**
@@ -838,6 +862,12 @@ public:
 		{
 			std::lock_guard<std::mutex> lock2(imuDataMutex);
 			imuData->clear();
+		}
+
+		{
+			std::lock_guard<std::mutex> lock3(timeOriginMutex);
+			hasTimeOriginUs = false;
+			timeOriginUs    = 0;
 		}
 	}
 
@@ -945,10 +975,11 @@ protected:
 				const auto &stampedImage = frames[cameraId];
 				const auto &detector     = detectors[cameraId];
 				auto &observation        = observations[cameraId];
+				const auto rebasedTsUs   = getRebasedTimestampUs(stampedImage.timestamp);
 
 				// Search for pattern and draw it on the image frame
 				if (detector->findTarget(
-						stampedImage.image, aslam::Time(CalibratorUtils::toSec(stampedImage.timestamp)), observation)) {
+						stampedImage.image, aslam::Time(CalibratorUtils::toSec(rebasedTsUs)), observation)) {
 					std::vector<uint32_t> ids;
 					const size_t numCorners = observation.getCornersIdx(ids);
 					successes[cameraId]
@@ -969,7 +1000,8 @@ protected:
 			std::lock_guard<std::mutex> lock(targetObservationsMutex);
 			size_t cameraId = 0;
 			for (auto &observation : observations) {
-				camTargetObservations[cameraId]->emplace(frames[cameraId].timestamp, observation);
+				const auto rebasedTsUs = getRebasedTimestampUs(frames[cameraId].timestamp);
+				camTargetObservations[cameraId]->emplace(rebasedTsUs, observation);
 				cameraId++;
 			}
 		}
