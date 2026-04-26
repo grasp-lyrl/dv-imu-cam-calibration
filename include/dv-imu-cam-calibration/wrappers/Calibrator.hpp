@@ -739,6 +739,33 @@ public:
 			throw std::runtime_error("No observations collected");
 		}
 
+		{
+			std::lock_guard<std::mutex> lock1(targetObservationsMutex);
+			std::lock_guard<std::mutex> lock2(imuDataMutex);
+
+			const auto &cam0Obs = *camTargetObservations.at(0);
+			int64_t minTimestamp = cam0Obs.begin()->first;
+			int64_t maxTimestamp = cam0Obs.begin()->first;
+			size_t totalCorners  = 0;
+
+			for (const auto &[timestamp, observation] : cam0Obs) {
+				minTimestamp = std::min(minTimestamp, timestamp);
+				maxTimestamp = std::max(maxTimestamp, timestamp);
+				std::vector<uint32_t> ids;
+				totalCorners += observation.getCornersIdx(ids);
+			}
+
+			const double timeSpanS = CalibratorUtils::toSec(maxTimestamp - minTimestamp);
+			const double avgCorners = cam0Obs.empty() ? 0.0 : static_cast<double>(totalCorners) / cam0Obs.size();
+
+			std::cout << "Pre-optimization diagnostics:" << std::endl;
+			std::cout << "  Accepted views (cam0): " << cam0Obs.size() << std::endl;
+			std::cout << "  Average detected corners per view (cam0): " << avgCorners << std::endl;
+			std::cout << "  Timestamp span [s] (cam0): " << timeSpanS << std::endl;
+			std::cout << "  IMU samples: " << imuData->size() << std::endl;
+			std::cout << "  Min detected corners threshold: " << calibratorOptions.minDetectedCorners << std::endl;
+		}
+
 		std::cout << "Calibrating using " << camTargetObservations.at(0)->size() << " detections." << std::endl;
 
 		iccCalibrator->buildProblem(6, 100, 50, 1e6, 1e5, true, -1, -1, -1, !calibratorOptions.timeCalibration, true,
@@ -922,7 +949,10 @@ protected:
 				// Search for pattern and draw it on the image frame
 				if (detector->findTarget(
 						stampedImage.image, aslam::Time(CalibratorUtils::toSec(stampedImage.timestamp)), observation)) {
-					successes[cameraId] = observation.hasSuccessfulObservation();
+					std::vector<uint32_t> ids;
+					const size_t numCorners = observation.getCornersIdx(ids);
+					successes[cameraId]
+						= observation.hasSuccessfulObservation() && (numCorners >= calibratorOptions.minDetectedCorners);
 				}
 				else {
 					successes[cameraId] = false;
@@ -947,8 +977,8 @@ protected:
 		// Replace the most recent image even if no pattern detected
 		std::lock_guard<std::mutex> lock1(latestImageMutex);
 		latestImages = frames;
+		latestObservations.clear();
 		if (success) {
-			latestObservations.clear();
 			for (auto &observation : observations) {
 				latestObservations.push_back(
 					boost::make_shared<aslam::cameras::GridCalibrationTargetObservation>(observation));

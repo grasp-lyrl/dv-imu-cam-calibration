@@ -234,6 +234,7 @@ struct Options {
 	double spacingMeters  = 0.05;
 	double patternSpacing = 0.3;
 	PatternType pattern   = PatternType::ASYMMETRIC_CIRCLES_GRID;
+	size_t minDetectedCorners = 1;
 
 	// Optimization problem
 	size_t maxIter       = 20;

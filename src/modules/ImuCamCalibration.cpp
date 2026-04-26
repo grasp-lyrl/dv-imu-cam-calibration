@@ -19,8 +19,7 @@ namespace fs = std::filesystem;
 
 std::string getTimeString() {
 	return fmt::format("{:%Y-%m-%dT%H-%M-%SZ}",
-		std::chrono::current_zone()->to_local(
-			std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now())));
+		std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now()));
 }
 
 class ImuCamCalibration : public dv::ModuleBase {
@@ -146,6 +145,8 @@ public:
 			dv::ConfigOption::floatOption("Size of a calibration pattern element in meters", 0.05, 0.0, 1.0));
 		config.add("markerSpacing",
 			dv::ConfigOption::floatOption("Ratio of space between tags to tagSize (AprilGrid only)", 0.3, 0.0, 1.0));
+		config.add("minDetectedCorners",
+			dv::ConfigOption::intOption("Minimum detected corners required to accept a frame", 1, 1, 5000));
 		config.add("patternType", dv::ConfigOption::listOption("Type of calibration pattern to use", "aprilGrid",
 									  {"aprilGrid", "asymmetricCirclesGrid", "chessboard"}, false));
 
@@ -324,6 +325,7 @@ public:
 		mOptions.rows           = static_cast<size_t>(config.getInt("numPatternRows"));
 		mOptions.spacingMeters  = static_cast<double>(config.getFloat("markerSize"));
 		mOptions.patternSpacing = static_cast<double>(config.getFloat("markerSpacing"));
+		mOptions.minDetectedCorners = static_cast<size_t>(config.getInt("minDetectedCorners"));
 		mOptions.cameraInitialSettings.emplace_back().imageSize = frameInput.size();
 
 		// Add config for the second camera if it is connected
