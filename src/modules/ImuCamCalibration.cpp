@@ -149,6 +149,10 @@ public:
 			dv::ConfigOption::intOption("Minimum detected corners required to accept a frame", 1, 1, 5000));
 		config.add("patternType", dv::ConfigOption::listOption("Type of calibration pattern to use", "aprilGrid",
 									  {"aprilGrid", "asymmetricCirclesGrid", "chessboard"}, false));
+		config.add("priorIntrinsicsXml",
+			dv::ConfigOption::fileOpenOption(
+				"Optional OpenCV-XML calibration file to use as a prior for camera intrinsics and distortion",
+				"xml"));
 
 		// All the supported models are pinhole projection camera model. What change is the distortion.
 		config.add(
@@ -179,7 +183,8 @@ public:
 		config.add("recordData", dv::ConfigOption::boolOption("Record collected data in the output directory", true));
 
 		config.setPriorityOptions({"outputCalibrationDirectory", "calibrationModel", "boardHeight", "boardWidth",
-			"markerSize", "patternType", "startCollecting", "stopCollecting", "discard", "calibrate"});
+			"markerSize", "patternType", "priorIntrinsicsXml", "startCollecting", "stopCollecting", "discard",
+			"calibrate"});
 	}
 
 	void handleCollectionState() {
@@ -318,6 +323,61 @@ public:
 		handleCollectionState();
 	}
 
+	// Load camera intrinsics + distortion from an OpenCV-XML calibration file written
+	// by the standalone camera calibrator. The XML wraps the data in a per-device node
+	// (e.g. <DVXplorerM_DXUS0034>) with `camera_matrix` and `distortion_coefficients`
+	// children; we pick the first such node so the device-name suffix doesn't matter.
+	// Distortion is truncated to 4 coefficients (k1, k2, p1, p2) to match kalibr's
+	// RadialTangentialDistortion model.
+	void loadIntrinsicsPriorFromXml(const std::string &path, CalibratorUtils::Options::CameraInits &cam) {
+		try {
+			cv::FileStorage fs(path, cv::FileStorage::READ);
+			if (!fs.isOpened()) {
+				log.warning << "priorIntrinsicsXml: could not open " << path << dv::logEnd;
+				return;
+			}
+
+			cv::FileNode camNode;
+			for (auto it = fs.root().begin(); it != fs.root().end(); ++it) {
+				const cv::FileNode child = *it;
+				if (child.isMap() && !child["camera_matrix"].empty()) {
+					camNode = child;
+					break;
+				}
+			}
+			if (camNode.empty()) {
+				log.warning << "priorIntrinsicsXml: no camera_matrix found in " << path << dv::logEnd;
+				return;
+			}
+
+			cv::Mat K, D;
+			camNode["camera_matrix"] >> K;
+			camNode["distortion_coefficients"] >> D;
+			if (K.rows != 3 || K.cols != 3) {
+				log.warning << "priorIntrinsicsXml: camera_matrix is not 3x3 in " << path << dv::logEnd;
+				return;
+			}
+
+			cam.intrinsics = {K.at<double>(0, 0), K.at<double>(1, 1), K.at<double>(0, 2), K.at<double>(1, 2)};
+
+			cam.distCoeffs.clear();
+			const int nCoeffs = std::min<int>(4, static_cast<int>(D.total()));
+			for (int i = 0; i < nCoeffs; ++i) {
+				cam.distCoeffs.push_back(D.at<double>(i));
+			}
+			while (cam.distCoeffs.size() < 4) {
+				cam.distCoeffs.push_back(0.0);
+			}
+
+			log.info << "priorIntrinsicsXml: loaded intrinsics fx=" << cam.intrinsics[0]
+					 << " fy=" << cam.intrinsics[1] << " cx=" << cam.intrinsics[2]
+					 << " cy=" << cam.intrinsics[3] << " from " << path << dv::logEnd;
+		}
+		catch (const std::exception &ex) {
+			log.warning << "priorIntrinsicsXml: failed to parse " << path << ": " << ex.what() << dv::logEnd;
+		}
+	}
+
 	void initializeCalibrator() {
 		const auto frameInput = inputs.getFrameInput("left");
 		mTimestampString      = getTimeString();
@@ -336,6 +396,27 @@ public:
 		if (rightInput.isConnected()) {
 			mOptions.cameraInitialSettings.emplace_back().imageSize = rightInput.size();
 		}
+
+		// If a prior calibration XML is provided, load camera intrinsics + distortion
+		// and use them as a starting guess instead of the (width, width, w/2, h/2)
+		// defaults. Stereo: applied to the left camera only.
+		const auto priorXml = config.getString("priorIntrinsicsXml");
+		if (!priorXml.empty()) {
+			loadIntrinsicsPriorFromXml(priorXml, mOptions.cameraInitialSettings.front());
+		}
+
+#if WITH_IMU_CALIBRATION
+		// Seed the IMU extrinsic prior with a 180-degree rotation about y
+		// (diag(-1, +1, -1), zero translation). This matches the typical IMU-vs-camera
+		// mounting on this rig and gives findOrientationPriorCameraToImu a much
+		// better starting point than identity.
+		Eigen::Matrix4d T_cam_imu_prior  = Eigen::Matrix4d::Identity();
+		T_cam_imu_prior(0, 0)            = -1.0;
+		T_cam_imu_prior(2, 2)            = -1.0;
+		for (auto &cam : mOptions.cameraInitialSettings) {
+			cam.T_cam_imu_initial = T_cam_imu_prior;
+		}
+#endif
 
 		mOptions.maxIter = static_cast<size_t>(config.getInt("maxIter"));
 
@@ -837,29 +918,43 @@ protected:
 			outLog << "Building the problem..." << std::endl;
 			mCalibrator->buildProblem();
 
-			// Print the info before optimization
 			mCalibrator->getDvInfoBeforeOptimization(outLog);
 
-			// Run the optimization problem
 			outLog << "Optimizing..." << std::endl;
+			std::optional<IccCalibratorUtils::CalibrationResult> resultOpt;
 			try {
-				IccCalibratorUtils::CalibrationResult result = mCalibrator->calibrate();
-				// Print the info after optimization
+				resultOpt = mCalibrator->calibrate();
 				mCalibrator->getDvInfoAfterOptimization(outLog);
-
-				// Print the result
-				outLog << "RESULT" << std::endl;
-				IccCalibratorUtils::printResult(result, outLog);
-
-				// Save the calibration to a text file
-				saveCalibration(intrinsicsResult.value(), result);
-				collectionState = CALIBRATED;
 			}
-			catch (std::exception &ex) {
-				outLog << ex.what() << std::endl;
-				log.error << "Optimization failed. Please make sure that the pattern is detected on all frames in your "
-							 "dataset and repeat the calibration"
-						  << dv::logEnd;
+			catch (const std::exception &ex) {
+				outLog << "Optimization threw: " << ex.what() << std::endl;
+				log.error << "Optimization threw: " << ex.what() << dv::logEnd;
+			}
+
+			if (resultOpt.has_value()) {
+				outLog << "RESULT" << std::endl;
+				IccCalibratorUtils::printResult(*resultOpt, outLog);
+
+				try {
+					saveCalibration(intrinsicsResult.value(), *resultOpt);
+					config.setBool("calibrationFinished", true);
+					collectionState = CALIBRATED;
+					if (!resultOpt->converged) {
+						log.warning
+							<< "Optimization did not fully converge (hit maxIter). "
+							   "Calibration was still saved; consider re-recording with more motion."
+							<< dv::logEnd;
+					}
+				}
+				catch (const std::exception &saveEx) {
+					outLog << "Save failed: " << saveEx.what() << std::endl;
+					log.error << "Save failed: " << saveEx.what() << dv::logEnd;
+					initializeCalibrator();
+					collectionState = BEFORE_COLLECTING;
+				}
+			}
+			else {
+				log.error << "Optimization aborted; nothing to save. Re-record with more motion." << dv::logEnd;
 				initializeCalibrator();
 				collectionState = BEFORE_COLLECTING;
 			}

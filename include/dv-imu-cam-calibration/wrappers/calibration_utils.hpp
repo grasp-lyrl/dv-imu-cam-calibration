@@ -249,6 +249,10 @@ struct Options {
 		std::vector<double> intrinsics;
 		std::vector<double> distCoeffs;
 		cv::Size imageSize;
+		// Initial guess for T_cam_imu (camera frame in IMU body frame). Identity by
+		// default; if set, is used to seed the orientation-prior optimizer and the
+		// joint-problem extrinsic design variables.
+		Eigen::Matrix4d T_cam_imu_initial = Eigen::Matrix4d::Identity();
 	};
 
 	std::vector<CameraInits> cameraInitialSettings;

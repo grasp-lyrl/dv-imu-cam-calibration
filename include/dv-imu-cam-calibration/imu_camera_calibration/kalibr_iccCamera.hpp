@@ -55,6 +55,12 @@ protected:
 	double timeshiftCamToImuPrior = 0.0;
 	CameraModel<CameraGeometryType, DistortionType> camera;
 	const cv::Size imageSize;
+	// When true, findOrientationPriorCameraToImu does not optimize/overwrite
+	// T_extrinsic; it only estimates gravity (and gyro bias) given the user-
+	// supplied T_extrinsic. The joint LM problem then refines T_extrinsic from
+	// that prior. Set via setExtrinsicPrior(...) when the caller provides a
+	// non-identity prior.
+	bool fixOrientationPrior = false;
 
 	Eigen::Vector3d gravity_w;
 	double timeOffset = 0.0;
@@ -92,6 +98,20 @@ public:
 		camera = CameraModel<CameraGeometryType, DistortionType>(_intrinsics, _distCoeffs, imageSize);
 	}
 
+	// Seed T_extrinsic (T_cam_imu) before buildProblem(). Used as the starting
+	// point for findOrientationPriorCameraToImu and for the joint-problem
+	// extrinsic design variables. When `fixOrientation` is true, the orientation
+	// prior step does not move T_extrinsic; it only computes gravity (and gyro
+	// bias prior) using the supplied T_extrinsic. The joint LM problem still
+	// refines T_extrinsic.
+	void setExtrinsicPrior(const sm::kinematics::Transformation &T_cam_imu, bool fixOrientation = false) {
+		T_extrinsic          = T_cam_imu;
+		fixOrientationPrior  = fixOrientation;
+		std::cout << "IccCamera: extrinsic prior set" << (fixOrientation ? " (fixed)" : " (refinable)")
+				  << ", T_cam_imu =\n"
+				  << T_extrinsic.T() << std::endl;
+	}
+
 	sm::kinematics::Transformation getTransformation() {
 		assert(T_c_b_Dv_q != nullptr);
 		assert(T_c_b_Dv_t != nullptr);
@@ -105,14 +125,24 @@ public:
 	}
 
 	void findOrientationPriorCameraToImu(boost::shared_ptr<IccImu> iccImu) {
-		std::cout << std::endl << "Estimating imu-camera rotation prior" << std::endl << std::endl;
+		if (fixOrientationPrior) {
+			std::cout << std::endl
+					  << "Skipping imu-camera rotation prior (using user-supplied prior). "
+						 "Estimating gravity and gyro-bias only."
+					  << std::endl
+					  << std::endl;
+		}
+		else {
+			std::cout << std::endl << "Estimating imu-camera rotation prior" << std::endl << std::endl;
+		}
 
 		// Build the problem
 		auto problem = boost::make_shared<aslam::backend::OptimizationProblem>();
 
-		// Add the rotation as design variable
+		// Add the rotation as design variable. When fixed, mark inactive so the
+		// optimizer only moves the gyro bias.
 		auto q_i_c_Dv = boost::make_shared<aslam::backend::RotationQuaternion>(T_extrinsic.q());
-		q_i_c_Dv->setActive(true);
+		q_i_c_Dv->setActive(!fixOrientationPrior);
 		problem->addDesignVariable(q_i_c_Dv);
 
 		// Add the gyro bias as design variable
@@ -172,9 +202,13 @@ public:
 			throw std::runtime_error("Failed to obtain orientation prior!");
 		}
 
-		// overwrite the external rotation prior (keep the external translation prior)
+		// Compute R_i_c. When fixed, q_i_c_Dv is unchanged from T_extrinsic so this
+		// matches the user-supplied prior; otherwise it's the optimized value, and
+		// we overwrite T_extrinsic's rotation (keeping its translation).
 		const auto R_i_c = q_i_c_Dv->toRotationMatrix().transpose();
-		T_extrinsic      = sm::kinematics::Transformation(sm::kinematics::rt2Transform(R_i_c, T_extrinsic.t()));
+		if (!fixOrientationPrior) {
+			T_extrinsic = sm::kinematics::Transformation(sm::kinematics::rt2Transform(R_i_c, T_extrinsic.t()));
+		}
 
 		// estimate gravity in the world coordinate frame as the mean specific force
 		std::vector<Eigen::Vector3d> a_w;

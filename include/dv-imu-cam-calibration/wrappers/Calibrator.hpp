@@ -23,6 +23,7 @@
 #include <atomic>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <tbb/parallel_for_each.h>
 
@@ -82,11 +83,17 @@ protected:
 		cv::Scalar(128, 0, 128), cv::Scalar(0, 255, 128), cv::Scalar(0, 128, 128)};
 
 public:
-	int64_t getRebasedTimestampUs(const int64_t timestamp) {
+	// Returns the rebased timestamp [us], or std::nullopt if `timestamp` predates
+	// the (already-fixed) origin. aslam::Time stores time as uint32_t internally,
+	// so any negative rebased value silently corrupts downstream spline math.
+	std::optional<int64_t> getRebasedTimestampUs(const int64_t timestamp) {
 		std::lock_guard<std::mutex> lock(timeOriginMutex);
 		if (!hasTimeOriginUs) {
 			timeOriginUs    = timestamp;
 			hasTimeOriginUs = true;
+		}
+		if (timestamp < timeOriginUs) {
+			return std::nullopt;
 		}
 		return timestamp - timeOriginUs;
 	}
@@ -202,6 +209,12 @@ public:
 				= boost::make_shared<std::map<int64_t, aslam::cameras::GridCalibrationTargetObservation>>();
 			const auto iccCamera = boost::make_shared<IccCamera<CameraGeometryType, DistortionType>>(
 				cameraOptions.intrinsics, cameraOptions.distCoeffs, cameraOptions.imageSize, targetObservations);
+			// Treat any non-identity prior as user-supplied: keep it fixed during the
+			// orientation-prior step so it carries through to buildProblem.
+			const bool priorIsCustom
+				= !cameraOptions.T_cam_imu_initial.isApprox(Eigen::Matrix4d::Identity(), 1e-12);
+			iccCamera->setExtrinsicPrior(
+				sm::kinematics::Transformation(cameraOptions.T_cam_imu_initial), priorIsCustom);
 			iccCameras.push_back(iccCamera);
 
 			camTargetObservations.insert(std::make_pair(camId, targetObservations));
@@ -244,7 +257,8 @@ public:
 	void addImu(const int64_t timestamp, const Eigen::Vector3d &gyro, const Eigen::Vector3d &acc) override {
 		if (state == CalibratorUtils::COLLECTING) {
 			const auto rebasedTsUs = getRebasedTimestampUs(timestamp);
-			const double tsS       = CalibratorUtils::toSec(rebasedTsUs);
+			if (!rebasedTsUs.has_value()) return;
+			const double tsS       = CalibratorUtils::toSec(*rebasedTsUs);
 			const auto Rgyro       = Eigen::Matrix3d::Identity() * iccImu->getGyroUncertaintyDiscrete();
 			const auto Raccel      = Eigen::Matrix3d::Identity() * iccImu->getAccelUncertaintyDiscrete();
 			IccImuUtils::ImuMeasurement imuMeas(tsS, gyro, acc, Rgyro, Raccel);
@@ -977,9 +991,14 @@ protected:
 				auto &observation        = observations[cameraId];
 				const auto rebasedTsUs   = getRebasedTimestampUs(stampedImage.timestamp);
 
+				if (!rebasedTsUs.has_value()) {
+					successes[cameraId] = false;
+					return;
+				}
+
 				// Search for pattern and draw it on the image frame
 				if (detector->findTarget(
-						stampedImage.image, aslam::Time(CalibratorUtils::toSec(rebasedTsUs)), observation)) {
+						stampedImage.image, aslam::Time(CalibratorUtils::toSec(*rebasedTsUs)), observation)) {
 					std::vector<uint32_t> ids;
 					const size_t numCorners = observation.getCornersIdx(ids);
 					successes[cameraId]
@@ -1001,7 +1020,9 @@ protected:
 			size_t cameraId = 0;
 			for (auto &observation : observations) {
 				const auto rebasedTsUs = getRebasedTimestampUs(frames[cameraId].timestamp);
-				camTargetObservations[cameraId]->emplace(rebasedTsUs, observation);
+				if (rebasedTsUs.has_value()) {
+					camTargetObservations[cameraId]->emplace(*rebasedTsUs, observation);
+				}
 				cameraId++;
 			}
 		}
