@@ -40,6 +40,17 @@ protected:
 	int64_t mStartTime      = -1;
 	int64_t mWarmUpDuration = 100'000;
 
+#if WITH_IMU_CALIBRATION
+	// Cached IMU biases / scales parsed from the config strings. Refreshed when
+	// any string changes between IMU packets.
+	std::string mAccelBiasStringCache;
+	std::string mGyroBiasStringCache;
+	std::string mAccelScaleStringCache;
+	Eigen::Vector3d mAccelBiasCache = Eigen::Vector3d::Zero();
+	Eigen::Vector3d mGyroBiasCache  = Eigen::Vector3d::Zero();
+	Eigen::Vector3d mAccelInvScaleCache = Eigen::Vector3d::Ones();
+#endif
+
 	boost::circular_buffer<dv::Frame> mLeftFrames  = boost::circular_buffer<dv::Frame>(5);
 	boost::circular_buffer<dv::Frame> mRightFrames = boost::circular_buffer<dv::Frame>(5);
 	dv::io::MonoCameraWriter::Config mWriterConfig;
@@ -182,9 +193,35 @@ public:
 		// IMU noise parameters
 		config.add("recordData", dv::ConfigOption::boolOption("Record collected data in the output directory", true));
 
+#if WITH_IMU_CALIBRATION
+		// Per-device IMU bias priors as comma-separated x,y,z triples.
+		// Subtracted from every IMU sample before it reaches kalibr, so the bias
+		// spline starts near zero rather than having to absorb a large constant
+		// factory offset. Defaults are accelerometer_bias_refined_m_s2 and
+		// gyroscope_bias_rad_s from the static-orientation bias calibration tool;
+		// override per-device by editing the strings in the GUI. Set to empty to
+		// disable debiasing.
+		config.add("accelBias",
+			dv::ConfigOption::stringOption("Accelerometer bias x,y,z [m/s^2] (subtracted from every IMU sample)",
+				"0.822333771293767, -0.4204056391087951, 0.13869418012856144"));
+		config.add("gyroBias",
+			dv::ConfigOption::stringOption("Gyroscope bias x,y,z [rad/s] (subtracted from every IMU sample)",
+				"-0.008375375021517997, -0.0031113306658109284, -0.0039612173365261875"));
+		// Per-axis accelerometer scale factor: measured = scale * true, so
+		// corrected = (raw - bias) / scale, applied independently per axis.
+		// Defaults are `per_axis[x|y|z].scale_factor` from the static-orientation
+		// bias calibration tool. The z axis was not scale-calibrated (no z_up pair),
+		// so its scale defaults to 1.0 — the refined bias still applies. Set any
+		// component to 1.0 to disable scale correction on that axis.
+		config.add("accelScale",
+			dv::ConfigOption::stringOption(
+				"Accelerometer scale factors x,y,z (corrected = (raw - bias) / scale, per-axis)",
+				"0.9963230510072503, 0.9925088890752373, 1.0"));
+#endif
+
 		config.setPriorityOptions({"outputCalibrationDirectory", "calibrationModel", "boardHeight", "boardWidth",
-			"markerSize", "patternType", "priorIntrinsicsXml", "startCollecting", "stopCollecting", "discard",
-			"calibrate"});
+			"markerSize", "patternType", "priorIntrinsicsXml", "accelBias", "accelScale", "gyroBias",
+			"startCollecting", "stopCollecting", "discard", "calibrate"});
 	}
 
 	void handleCollectionState() {
@@ -203,6 +240,11 @@ public:
 		switch (collectionState) {
 			case BEFORE_COLLECTING: {
 				if (config.getBool("startCollecting")) {
+					// Re-initialize so the latest GUI values for pattern type / rows /
+					// columns / marker size / spacing / priorIntrinsicsXml etc. are
+					// picked up. Without this the calibrator stays bound to whichever
+					// values were live at module-load time.
+					initializeCalibrator();
 					collectionState = DURING_COLLECTING;
 					mCalibrator->startCollecting();
 					log.info("Started collecting images");
@@ -378,6 +420,38 @@ public:
 		}
 	}
 
+#if WITH_IMU_CALIBRATION
+	// Parse a "x, y, z" triple. Returns Vector3d::Zero() and logs a warning on
+	// any failure (empty or malformed string), so a typo just disables debiasing
+	// for that axis-set rather than aborting the calibration.
+	Eigen::Vector3d parseBiasTriple(const std::string &raw, const std::string &label) {
+		Eigen::Vector3d out = Eigen::Vector3d::Zero();
+		if (raw.empty()) {
+			return out;
+		}
+		std::stringstream ss(raw);
+		std::string token;
+		size_t idx = 0;
+		while (std::getline(ss, token, ',') && idx < 3) {
+			try {
+				out(static_cast<int>(idx)) = std::stod(token);
+				++idx;
+			}
+			catch (const std::exception &) {
+				log.warning << label << ": could not parse component '" << token << "' in '" << raw
+							<< "' — disabling debiasing for this axis-set." << dv::logEnd;
+				return Eigen::Vector3d::Zero();
+			}
+		}
+		if (idx != 3) {
+			log.warning << label << ": expected 3 comma-separated values, got " << idx << " in '" << raw
+						<< "' — disabling debiasing for this axis-set." << dv::logEnd;
+			return Eigen::Vector3d::Zero();
+		}
+		return out;
+	}
+#endif
+
 	void initializeCalibrator() {
 		const auto frameInput = inputs.getFrameInput("left");
 		mTimestampString      = getTimeString();
@@ -432,7 +506,11 @@ public:
 
 		// TODO: wrap a class around the MonoCameraWriter and the StereoCameraWriter
 		if (config.getBool("recordData")) {
-			mWriterConfig.cameraName = getCameraID("left");
+			// Reset the writer config to a fresh instance so re-entry of
+			// initializeCalibrator() (e.g. on each Start Collecting press) does not
+			// re-add streams to the same Config — dv-processing rejects duplicates
+			// with "Writer already contains a stream with the given name".
+			mWriterConfig = dv::io::MonoCameraWriter::Config(getCameraID("left"));
 			mWriterConfig.addFrameStream(frameInput.size(), "frames");
 #if WITH_IMU_CALIBRATION
 			if (inputs.getIMUInput("imu").isConnected()) {
@@ -585,9 +663,43 @@ public:
 					return;
 				}
 
+				// Refresh bias / scale caches when the user edits the strings. No-op on
+				// the hot path when nothing changed.
+				const auto accelBiasStr  = config.getString("accelBias");
+				const auto gyroBiasStr   = config.getString("gyroBias");
+				const auto accelScaleStr = config.getString("accelScale");
+				if (accelBiasStr != mAccelBiasStringCache) {
+					mAccelBiasStringCache = accelBiasStr;
+					mAccelBiasCache       = parseBiasTriple(accelBiasStr, "accelBias");
+					log.info << "Accelerometer bias updated to [" << mAccelBiasCache.x() << ", " << mAccelBiasCache.y()
+							 << ", " << mAccelBiasCache.z() << "] m/s^2" << dv::logEnd;
+				}
+				if (gyroBiasStr != mGyroBiasStringCache) {
+					mGyroBiasStringCache = gyroBiasStr;
+					mGyroBiasCache       = parseBiasTriple(gyroBiasStr, "gyroBias");
+					log.info << "Gyroscope bias updated to [" << mGyroBiasCache.x() << ", " << mGyroBiasCache.y()
+							 << ", " << mGyroBiasCache.z() << "] rad/s" << dv::logEnd;
+				}
+				if (accelScaleStr != mAccelScaleStringCache) {
+					mAccelScaleStringCache       = accelScaleStr;
+					const Eigen::Vector3d scale  = parseBiasTriple(accelScaleStr, "accelScale");
+					// Each axis: invert if positive, else fall back to identity (1.0)
+					// so a zero/empty/garbage entry just disables scale correction on
+					// that axis instead of producing inf.
+					for (int i = 0; i < 3; ++i) {
+						mAccelInvScaleCache(i) = (scale(i) > 1e-6) ? (1.0 / scale(i)) : 1.0;
+					}
+					log.info << "Accelerometer scale updated to [" << scale.x() << ", " << scale.y() << ", " << scale.z()
+							 << "]" << dv::logEnd;
+				}
+
 				for (const auto &singleImu : imuData) {
-					mCalibrator->addImu(singleImu.timestamp, singleImu.getAngularVelocities().cast<double>(),
-						singleImu.getAccelerations().cast<double>());
+					const Eigen::Vector3d gyro = singleImu.getAngularVelocities().cast<double>() - mGyroBiasCache;
+					// Per-axis: corrected_i = (raw_i - bias_i) * (1 / scale_i).
+					// cwiseProduct does the per-axis multiply.
+					const Eigen::Vector3d acc = (singleImu.getAccelerations().cast<double>() - mAccelBiasCache)
+													.cwiseProduct(mAccelInvScaleCache);
+					mCalibrator->addImu(singleImu.timestamp, gyro, acc);
 				}
 				if (collectionState == DURING_COLLECTING) {
 					for (const auto &singleImu : imuData) {
@@ -855,6 +967,89 @@ protected:
 		log.info << "Saved intrinsic calibration to a file: " << filePath << dv::logEnd;
 	}
 
+	// Bullet-proof dump of the calibration result to plain-text files. Avoids any
+	// dv-processing schema/serialization code so it can't be crashed by a bad cast,
+	// schema validation, etc. Two files: raw_result.txt (human-readable) and
+	// raw_result.json (loose JSON, no schema). Run before saveCalibration so the
+	// numbers survive even if saveCalibration segfaults.
+	void saveRawResult(const std::vector<CameraCalibrationUtils::CalibrationResult> &intrinsicResult,
+		const IccCalibratorUtils::CalibrationResult &result) {
+		try {
+			const auto saveDir = getCalibrationSaveDirectory();
+
+			std::ofstream txt(saveDir / "raw_result.txt");
+			txt << "converged: " << (result.converged ? "true" : "false") << "\n";
+			txt << "T_cam_imu (4x4 row-major):\n" << result.T_cam_imu << "\n";
+			txt << "t_cam_imu_seconds: " << result.t_cam_imu << "\n";
+			txt << "mean_reprojection_error_px: " << result.error_info.meanReprojectionError << "\n";
+			txt << "mean_gyroscope_error_rad_s: " << result.error_info.meanGyroscopeError << "\n";
+			txt << "mean_accelerometer_error_m_s2: " << result.error_info.meanAccelerometerError << "\n\n";
+			for (size_t i = 0; i < intrinsicResult.size(); ++i) {
+				const auto &r = intrinsicResult[i];
+				txt << "camera[" << i << "].fx: " << r.projection.at(0) << "\n";
+				txt << "camera[" << i << "].fy: " << r.projection.at(1) << "\n";
+				txt << "camera[" << i << "].cx: " << r.projection.at(2) << "\n";
+				txt << "camera[" << i << "].cy: " << r.projection.at(3) << "\n";
+				for (size_t k = 0; k < r.distortion.size(); ++k) {
+					txt << "camera[" << i << "].dist[" << k << "]: " << r.distortion[k] << "\n";
+				}
+				txt << "camera[" << i << "].baseline (4x4 row-major):\n" << r.baseline << "\n\n";
+			}
+			txt.flush();
+			txt.close();
+
+			std::ofstream js(saveDir / "raw_result.json");
+			js << "{\n";
+			js << "  \"converged\": " << (result.converged ? "true" : "false") << ",\n";
+			js << "  \"t_cam_imu_seconds\": " << result.t_cam_imu << ",\n";
+			js << "  \"T_cam_imu\": [";
+			for (int row = 0; row < 4; ++row) {
+				js << "[";
+				for (int col = 0; col < 4; ++col) {
+					js << result.T_cam_imu(row, col);
+					if (col < 3) {
+						js << ", ";
+					}
+				}
+				js << "]";
+				if (row < 3) {
+					js << ", ";
+				}
+			}
+			js << "],\n";
+			js << "  \"errors\": {\n";
+			js << "    \"reprojection_px\": " << result.error_info.meanReprojectionError << ",\n";
+			js << "    \"gyro_rad_s\": " << result.error_info.meanGyroscopeError << ",\n";
+			js << "    \"accel_m_s2\": " << result.error_info.meanAccelerometerError << "\n";
+			js << "  },\n";
+			js << "  \"cameras\": [\n";
+			for (size_t i = 0; i < intrinsicResult.size(); ++i) {
+				const auto &r = intrinsicResult[i];
+				js << "    {\n";
+				js << "      \"fx\": " << r.projection.at(0) << ", \"fy\": " << r.projection.at(1)
+				   << ", \"cx\": " << r.projection.at(2) << ", \"cy\": " << r.projection.at(3) << ",\n";
+				js << "      \"dist\": [";
+				for (size_t k = 0; k < r.distortion.size(); ++k) {
+					js << r.distortion[k];
+					if (k + 1 < r.distortion.size()) {
+						js << ", ";
+					}
+				}
+				js << "]\n";
+				js << "    }" << (i + 1 < intrinsicResult.size() ? "," : "") << "\n";
+			}
+			js << "  ]\n";
+			js << "}\n";
+			js.flush();
+			js.close();
+
+			log.info << "Wrote raw calibration dump to " << saveDir << "/raw_result.{txt,json}" << dv::logEnd;
+		}
+		catch (const std::exception &ex) {
+			log.error << "saveRawResult failed: " << ex.what() << dv::logEnd;
+		}
+	}
+
 	void saveCalibration(const std::vector<CameraCalibrationUtils::CalibrationResult> &intrinsicResult,
 		const IccCalibratorUtils::CalibrationResult &result) {
 		log.info << "Saving calibration..." << dv::logEnd;
@@ -934,6 +1129,13 @@ protected:
 			if (resultOpt.has_value()) {
 				outLog << "RESULT" << std::endl;
 				IccCalibratorUtils::printResult(*resultOpt, outLog);
+				outLog.flush();
+
+				// Fail-safe: dump all numerical values to plain-text files BEFORE
+				// invoking the dv-processing schema-formatted save. If saveCalibration
+				// crashes (segfault inside dv-processing), the user still has the
+				// numbers on disk to recover by hand.
+				saveRawResult(intrinsicsResult.value(), *resultOpt);
 
 				try {
 					saveCalibration(intrinsicsResult.value(), *resultOpt);
@@ -949,8 +1151,9 @@ protected:
 				catch (const std::exception &saveEx) {
 					outLog << "Save failed: " << saveEx.what() << std::endl;
 					log.error << "Save failed: " << saveEx.what() << dv::logEnd;
-					initializeCalibrator();
-					collectionState = BEFORE_COLLECTING;
+					// Even if the schema-formatted save failed, the raw dump is on disk.
+					config.setBool("calibrationFinished", true);
+					collectionState = CALIBRATED;
 				}
 			}
 			else {
